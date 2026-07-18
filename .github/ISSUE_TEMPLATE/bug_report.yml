@@ -1,0 +1,54 @@
+name: Bug report
+description: A tool returns an error, wrong data, or stops working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. This MCP drives a **real logged-in Threads session** through a browser, so a tool can break when Meta changes its UI or anti-bot behavior. Details help a lot.
+  - type: dropdown
+    id: tool-group
+    attributes:
+      label: Which tool?
+      options:
+        - Read (whoami, get_profile, get_thread, get_timeline, search, …)
+        - Write (create_thread, reply_to_thread, like_thread, follow_user, …)
+        - Schedule (schedule_thread, list_scheduled, cancel_scheduled)
+        - Login / session
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you call, what did you expect, and what did you get? Paste the tool's response text (redact anything private).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      placeholder: 'e.g. 0.1.0'
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: 'e.g. 20.11.0 (node -v)'
+  - type: dropdown
+    id: display
+    attributes:
+      label: Display
+      options:
+        - Real display (desktop / WSLg)
+        - Headless server via xvfb-run
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I ran `npm run login` and confirmed I'm signed in
+        - label: I ran with `DEBUG=true` and included any relevant output
+        - label: I searched existing issues for a duplicate

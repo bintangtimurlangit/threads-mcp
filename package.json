@@ -1,0 +1,85 @@
+{
+  "name": "@bintangtimurlangit/threads-mcp",
+  "version": "0.1.0",
+  "description": "An MCP server for Meta's Threads via a logged-in browser session — read profiles, posts, replies, timeline & search, and post/reply/like/repost/follow. No developer account: it uses your own cookie session.",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bintangtimurlangit/threads-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bintangtimurlangit/threads-mcp/issues"
+  },
+  "homepage": "https://github.com/bintangtimurlangit/threads-mcp#readme",
+  "bin": {
+    "threads-mcp": "build/index.js",
+    "threads-mcp-login": "build/login.js"
+  },
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
+    "prebuild": "npm run clean",
+    "build": "tsc",
+    "login": "tsx src/login.ts",
+    "dev": "tsx watch src/index.ts",
+    "start": "node build/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "tsx test/smoke.ts",
+    "prepare": "husky",
+    "prepublishOnly": "npm run build"
+  },
+  "lint-staged": {
+    "*.{ts,js,json,md,yml,yaml}": "prettier --write",
+    "*.ts": "eslint --fix"
+  },
+  "files": [
+    "build",
+    ".env.example",
+    "docs",
+    "CHANGELOG.md",
+    "LICENSE",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CODE_OF_CONDUCT.md"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "threads",
+    "meta",
+    "instagram",
+    "social-media",
+    "automation"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "cloakbrowser": "^0.4.10",
+    "dotenv": "^17.4.2",
+    "playwright": "^1.49.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.6.1",
+    "@commitlint/config-conventional": "^19.6.0",
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.3.0",
+    "prettier": "^3.4.2",
+    "tsx": "^4.23.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.19.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
