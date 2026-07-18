@@ -128,9 +128,19 @@ Local media paths must **still exist** when the job fires (URLs are re-downloade
 
 ---
 
-## Setup
+### From npm (recommended)
 
 ```bash
+npm install -g @bintangtimurlangit/threads-mcp   # downloads the CloakBrowser binary (~200 MB, cached)
+```
+
+This puts two commands on your PATH: **`threads-mcp`** (the server) and **`threads-mcp-login`** (one-time login). Or run without installing: `npx -y @bintangtimurlangit/threads-mcp`.
+
+### From source
+
+```bash
+git clone https://github.com/bintangtimurlangit/threads-mcp.git
+cd threads-mcp
 npm install          # also downloads the CloakBrowser binary (~200 MB, cached)
 npm run build
 ```
@@ -138,10 +148,10 @@ npm run build
 ### 1. Log in once
 
 ```bash
-npm run login        # opens a CloakBrowser window — log into Threads, then press Enter
+threads-mcp-login    # global install — or, from a source checkout:  npm run login
 ```
 
-Saves your session to `~/.threads-mcp/chrome-profile`. Re-run only when it expires.
+Opens a CloakBrowser window — log into Threads, then press Enter. Saves your session to `~/.threads-mcp/chrome-profile`. Re-run only when it expires.
 
 ### 2. Register with your MCP client
 
@@ -152,13 +162,13 @@ The server launches a **headed** browser, so it needs a display. On a headless m
   "mcpServers": {
     "threads": {
       "command": "xvfb-run",
-      "args": ["-a", "node", "/absolute/path/to/threads-mcp/build/index.js"]
+      "args": ["-a", "threads-mcp"]
     }
   }
 }
 ```
 
-On a machine with a real display, drop `xvfb-run`: `"command": "node"`, `"args": ["…/build/index.js"]`.
+On a machine with a real display, drop `xvfb-run`: `"command": "threads-mcp"`, `"args": []`. From a source checkout, use `"command": "node"`, `"args": ["/absolute/path/to/threads-mcp/build/index.js"]` (wrapped in `xvfb-run` on a headless box).
 
 ---
 
