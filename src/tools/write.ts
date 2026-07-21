@@ -850,12 +850,9 @@ export function registerWriteTools(server: McpServer): void {
           await domClick(following, 8000);
           await page.waitForTimeout(1000);
           // Confirm in the menu/dialog that appears.
-          let confirmed = await clickPopupOption(page, /^unfollow$/i);
+          const confirmed = await clickPopupOption(page, /^unfollow$/i);
           if (!confirmed)
-            confirmed = await domClick(
-              page.getByRole('button', { name: /^unfollow$/i }).first(),
-              5000,
-            );
+            await domClick(page.getByRole('button', { name: /^unfollow$/i }).first(), 5000);
           await page.waitForTimeout(1200);
           const done =
             (await page
