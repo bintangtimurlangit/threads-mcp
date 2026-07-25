@@ -128,6 +128,8 @@ Local media paths must **still exist** when the job fires (URLs are re-downloade
 
 ---
 
+## Setup
+
 ### From npm (recommended)
 
 ```bash
