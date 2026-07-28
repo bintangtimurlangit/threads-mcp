@@ -8,13 +8,22 @@ import type { Page } from 'playwright';
 import { threadsUrl, normalizeHandle } from '../api/client.js';
 import { BASE_URL, onPage, isLoggedIn } from '../browser/session.js';
 import { withErrorHandling } from '../utils/errors.js';
+import { invalidateAfterWrite } from '../utils/cache.js';
 import { throttleWrite, rateLimitReminder } from '../utils/ratelimit.js';
 import { WRITE_CREATES, WRITE_TOGGLES, WRITE_DESTRUCTIVE } from '../utils/annotations.js';
 import { ThreadsAuthRequiredError, ThreadsAPIError } from '../api/client.js';
 
 type TextResult = { content: Array<{ type: 'text'; text: string }> };
 
+/**
+ * Wrap a successful write result. Every write tool returns through here, which
+ * makes it the one place guaranteed to run after a mutation — so it is also
+ * where cached reads are dropped. Without this a `get_profile` immediately
+ * after `create_thread` would serve the pre-post snapshot for up to CACHE_TTL_MS
+ * and look like the post silently failed.
+ */
 function ok(text: string): TextResult {
+  invalidateAfterWrite();
   return { content: [{ type: 'text', text: text + rateLimitReminder() }] };
 }
 
@@ -364,6 +373,9 @@ export async function publishThread(opts: { text?: string; media?: string[] }): 
       const what = paths.length
         ? `${text ? `"${text}" + ` : ''}${paths.length} media`
         : `"${text}"`;
+      // The scheduler calls publishThread directly, bypassing ok(), so drop
+      // stale reads here too.
+      invalidateAfterWrite();
       return closed
         ? `✅ Posted to Threads: ${what}`
         : `📤 Submitted the post (${what}), but couldn't confirm the composer closed. Check your profile.`;
