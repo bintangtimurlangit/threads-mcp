@@ -1,6 +1,6 @@
 # Configuration
 
-For installing the package or cloning the repo, see **[Installation](../README.md#installation)** in the README.
+For installing the package or cloning the repo, see **[Setup](../README.md#setup)** in the README.
 
 > **Login required.** This server acts as your own Threads account via a saved browser session. Run `npm run login` once before use. There are no API keys — authentication is the browser session under `~/.threads-mcp/chrome-profile`.
 
@@ -68,6 +68,49 @@ Use an **absolute** path to `build/index.js`. For reliable scheduling across cli
 - **Linux:** `~/.config/Claude/claude_desktop_config.json`
 
 Use the same **`mcpServers`** JSON as above.
+
+## Hermes Agent
+
+Hermes has a native MCP client. Build the server first, then register the
+compiled entry point:
+
+```bash
+npm run build
+
+# Headless Linux server
+hermes mcp add threads \
+  --command /usr/bin/xvfb-run \
+  --connect-timeout 120 \
+  --env TZ=Asia/Jakarta \
+  --args -a "$(command -v node)" "$(pwd)/build/index.js"
+
+# Desktop / WSLg with a real display
+hermes mcp add threads \
+  --command "$(command -v node)" \
+  --connect-timeout 120 \
+  --env TZ=Asia/Jakarta \
+  --args "$(pwd)/build/index.js"
+```
+
+The `TZ` value controls how offset-free `schedule_thread.at` timestamps are
+interpreted and displayed. Replace `Asia/Jakarta` with the account operator's
+timezone, or omit it and always provide an explicit ISO 8601 offset.
+
+The add command connects immediately, shows the discovered tools, and asks
+which ones to enable. Verify the saved integration with:
+
+```bash
+hermes mcp test threads
+hermes mcp list
+```
+
+Start a new Hermes session after adding or changing the server so its tools are
+discovered. They are exposed with the `mcp_threads_` prefix, for example
+`mcp_threads_whoami` and `mcp_threads_create_thread`.
+
+Run `npm run login` once before calling account-backed tools. On a remote
+headless machine, the login window still needs an interactive display; `xvfb`
+alone makes the window render but does not provide a way to operate it.
 
 ## Other editors
 

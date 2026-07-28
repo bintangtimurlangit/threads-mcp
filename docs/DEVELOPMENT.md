@@ -1,5 +1,7 @@
 # Development
 
+Requires Node.js 20 or newer. CI covers Node.js 20, 22, and 24.
+
 ## Scripts
 
 | Command             | Description                                                 |
