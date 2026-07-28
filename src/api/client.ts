@@ -1,4 +1,5 @@
 import { captureGraphqlBatch, BASE_URL, isLoggedIn } from '../browser/session.js';
+import type { TriggerContext } from '../browser/session.js';
 import type { Page } from 'playwright';
 
 // ─── Error types ──────────────────────────────────────────────────────────────
@@ -55,7 +56,7 @@ export async function threadsCapture(
   pageUrl: string,
   friendlyName: string,
   opts: {
-    trigger?: (page: Page) => Promise<void>;
+    trigger?: (page: Page, ctx: TriggerContext) => Promise<void>;
     dwellMs?: number;
     timeoutMs?: number;
     /** Stop as soon as this says we have enough — see BatchOptions.enough. */
