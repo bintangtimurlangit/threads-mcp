@@ -91,6 +91,29 @@ export interface BatchOptions {
   dwellMs?: number;
   /** Navigation timeout (ms, default 30000). */
   timeoutMs?: number;
+  /**
+   * "Do we have what the caller asked for yet?" Checked against the bodies
+   * collected so far, and the single biggest lever on read latency: satisfied
+   * early, we stop dwelling immediately.
+   *
+   * Keep it cheap — it runs each poll tick (only when new bodies have arrived).
+   */
+  enough?: (bodies: unknown[]) => boolean;
+  /**
+   * May `trigger` be skipped entirely when `enough` is already satisfied by the
+   * server-rendered payload?
+   *
+   * Only true for triggers that fetch *more of the same* data — scrolling a
+   * feed for additional posts. It must stay false for a trigger that opens a
+   * different surface (the followers dialog), because there the embedded
+   * payload can satisfy a naive count with entirely the wrong records: a
+   * profile page embeds post authors and recommendations, which are users, but
+   * are not followers.
+   *
+   * Defaults to false so a new caller that forgets it loses the optimisation
+   * rather than silently returning wrong data.
+   */
+  triggerSkippable?: boolean;
 }
 
 /** Pull `fb_api_req_friendly_name` out of a GraphQL POST body (form-encoded). */
@@ -127,11 +150,44 @@ function parseJsonBodies(txt: string): unknown[] {
 }
 
 /**
+ * Threads server-renders profile/post/feed data into
+ * `<script type="application/json">` blocks in the initial HTML — this is the
+ * primary data source. The live GraphQL responses only cover lazy/secondary
+ * queries (side-nav, scroll pagination).
+ */
+async function harvestEmbedded(page: Page): Promise<unknown[]> {
+  const out: unknown[] = [];
+  try {
+    const raws = await page.$$eval('script[type="application/json"]', (nodes) =>
+      (nodes as Array<{ textContent: string | null }>).map((n) => n.textContent || ''),
+    );
+    for (const raw of raws) {
+      if (raw.length < 40) continue;
+      try {
+        out.push(JSON.parse(raw));
+      } catch {
+        /* not standalone JSON — skip */
+      }
+    }
+    debug(`harvested ${out.length} embedded JSON blocks`);
+  } catch {
+    /* page may have navigated away — ignore */
+  }
+  return out;
+}
+
+/**
  * Navigate to `pageUrl` (optionally then run `trigger`) and collect the JSON
  * bodies of every `/api/graphql` response the app fires — the queries carry
  * valid fb_dtsg / lsd tokens. Returns all captured bodies, with any matching
  * `opts.friendlyName` first. Callers walk the bodies with defensive extractors,
  * so we don't depend on Meta keeping operation names stable.
+ *
+ * Ordering matters for latency. The embedded JSON is read straight after
+ * navigation and checked against `opts.enough` *before* we scroll or dwell,
+ * because the server-rendered payload usually already answers the request. The
+ * previous order — dwell the full window, then harvest — paid several seconds
+ * of fixed sleep for data that had been sitting in the HTML the whole time.
  */
 export async function captureGraphqlBatch<T = unknown>(
   pageUrl: string,
@@ -145,6 +201,7 @@ export async function captureGraphqlBatch<T = unknown>(
     const page = await getPage();
     const collected: Array<{ name?: string; json: unknown }> = [];
     const pending: Array<Promise<void>> = [];
+    let embedded: unknown[] = [];
 
     const listener = (r: Response) => {
       // Threads uses two GraphQL endpoints: /api/graphql (profile/post surfaces)
@@ -162,23 +219,71 @@ export async function captureGraphqlBatch<T = unknown>(
       );
     };
 
+    /** Bodies in priority order: embedded first, then the preferred op, then the rest. */
+    const order = (): T[] => {
+      const named = opts.friendlyName
+        ? collected.filter((b) => b.name?.includes(opts.friendlyName!))
+        : [];
+      const rest = collected.filter((b) => !named.includes(b));
+      return [...embedded, ...named.map((b) => b.json), ...rest.map((b) => b.json)] as T[];
+    };
+
+    // Re-running the predicate on an unchanged body set just burns CPU, so only
+    // re-check when something new has actually landed.
+    let lastChecked = -1;
+    const satisfied = (): boolean => {
+      if (!opts.enough) return false;
+      const n = embedded.length + collected.length;
+      if (n === lastChecked) return false;
+      lastChecked = n;
+      return opts.enough(order() as unknown[]);
+    };
+
     page.on('response', listener);
     try {
       if (trigger) {
         if (!page.url().startsWith(pageUrl)) {
           await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
         }
-        await trigger(page);
       } else {
         await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
       }
 
-      const deadline = Date.now() + dwellMs;
-      while (Date.now() < deadline) {
-        await page.waitForTimeout(250);
-        if (opts.friendlyName && collected.some((b) => b.name?.includes(opts.friendlyName!))) {
-          await page.waitForTimeout(500); // let sibling queries land
-          break;
+      embedded = await harvestEmbedded(page);
+
+      // The server-rendered payload often already covers the request. When it
+      // does, skip the dwell — and the trigger too, but only when the caller
+      // marked it skippable (see BatchOptions.triggerSkippable).
+      const canSkipTrigger = !trigger || opts.triggerSkippable === true;
+      if (canSkipTrigger && satisfied()) {
+        debug('satisfied by embedded payload — skipping trigger and dwell');
+      } else {
+        if (trigger) {
+          await trigger(page);
+          // The trigger may have navigated or forced more server-rendered
+          // content in; re-read and replace rather than append, so identical
+          // blocks aren't parsed and walked twice.
+          embedded = await harvestEmbedded(page);
+          lastChecked = -1;
+        }
+
+        const deadline = Date.now() + dwellMs;
+        while (Date.now() < deadline) {
+          if (satisfied()) {
+            debug('dwell satisfied early');
+            break;
+          }
+          // Without a predicate, fall back to the old signal: the preferred
+          // operation landing means the surface we wanted has responded.
+          if (
+            !opts.enough &&
+            opts.friendlyName &&
+            collected.some((b) => b.name?.includes(opts.friendlyName!))
+          ) {
+            await page.waitForTimeout(500); // let sibling queries land
+            break;
+          }
+          await page.waitForTimeout(250);
         }
       }
     } finally {
@@ -186,34 +291,7 @@ export async function captureGraphqlBatch<T = unknown>(
     }
 
     await Promise.allSettled(pending);
-
-    // Threads server-renders profile/post/feed data into <script type="application/json">
-    // blocks in the initial HTML — the primary data source. The live /api/graphql
-    // responses above only cover lazy/secondary queries (side-nav, scroll pagination).
-    // Harvest the embedded blocks and put them first (they're the top of the page).
-    const embedded: unknown[] = [];
-    try {
-      const raws = await page.$$eval('script[type="application/json"]', (nodes) =>
-        (nodes as Array<{ textContent: string | null }>).map((n) => n.textContent || ''),
-      );
-      for (const raw of raws) {
-        if (raw.length < 40) continue;
-        try {
-          embedded.push(JSON.parse(raw));
-        } catch {
-          /* not standalone JSON — skip */
-        }
-      }
-      if (process.env.DEBUG === 'true') debug(`harvested ${embedded.length} embedded JSON blocks`);
-    } catch {
-      /* page may have navigated away — ignore */
-    }
-
-    const named = opts.friendlyName
-      ? collected.filter((b) => b.name?.includes(opts.friendlyName!))
-      : [];
-    const rest = collected.filter((b) => !named.includes(b));
-    return [...embedded, ...named.map((b) => b.json), ...rest.map((b) => b.json)] as T[];
+    return order();
   });
 }
 

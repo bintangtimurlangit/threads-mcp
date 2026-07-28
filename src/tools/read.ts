@@ -38,6 +38,20 @@ async function scrollFeed(page: Page, times: number): Promise<void> {
   }
 }
 
+/**
+ * "Stop as soon as we have `limit` posts." Passed to the capture layer so a
+ * request that the server-rendered HTML already satisfies costs one page load
+ * instead of a scroll loop plus a fixed multi-second dwell.
+ */
+function enoughPosts(limit: number): (bodies: unknown[]) => boolean {
+  return (bodies) => extractPosts(bodies).length >= limit;
+}
+
+/** As above, for the user-shaped surfaces (search people, followers). */
+function enoughUsers(limit: number): (bodies: unknown[]) => boolean {
+  return (bodies) => extractUsers(bodies, limit + 8).length >= limit;
+}
+
 export function registerReadTools(server: McpServer): void {
   // ── whoami ─────────────────────────────────────────────────────────────────────
   server.registerTool(
@@ -162,7 +176,12 @@ export function registerReadTools(server: McpServer): void {
         const user = normalizeHandle(handle);
         const bodies = await threadsCapture(profileUrl(user), 'ProfileThreadsTab', {
           trigger: limit > 8 ? (p) => scrollFeed(p, Math.ceil(limit / 8)) : undefined,
+          triggerSkippable: true, // scrolling just fetches more of the same posts
           dwellMs: 4000,
+          // Count only this user's posts: a profile page also embeds
+          // recommendation rails, which would otherwise satisfy the check early.
+          enough: (b) =>
+            extractPosts(b).filter((p) => p.user?.username?.toLowerCase() === user).length >= limit,
         });
         const posts = extractPosts(bodies)
           .filter((p) => p.user?.username?.toLowerCase() === user)
@@ -252,7 +271,10 @@ export function registerReadTools(server: McpServer): void {
         }
         const bodies = await threadsCapture(parsed.pageUrl, 'PostPage', {
           trigger: (p) => scrollFeed(p, Math.ceil(limit / 8)),
+          triggerSkippable: true, // scrolling just fetches more replies
           dwellMs: 4000,
+          // +1 for the root post, which isn't a reply.
+          enough: enoughPosts(limit + 1),
         });
         const all = extractPosts(bodies);
         // Identify the root post so it isn't reported as a reply to itself.
@@ -297,7 +319,9 @@ export function registerReadTools(server: McpServer): void {
       return withErrorHandling(async () => {
         const bodies = await threadsCapture(`${BASE_URL}/`, 'FeedDirect', {
           trigger: limit > 8 ? (p) => scrollFeed(p, Math.ceil(limit / 8)) : undefined,
+          triggerSkippable: true, // scrolling just fetches more of the same posts
           dwellMs: 5000,
+          enough: enoughPosts(limit),
         });
         const posts = extractPosts(bodies).slice(0, limit);
         if (posts.length === 0) {
@@ -344,7 +368,9 @@ export function registerReadTools(server: McpServer): void {
         const searchUrl = threadsUrl(`/search?q=${q}${filter}`);
         const bodies = await threadsCapture(searchUrl, 'Search', {
           trigger: limit > 8 ? (p) => scrollFeed(p, Math.ceil(limit / 8)) : undefined,
+          triggerSkippable: true, // scrolling just fetches more of the same posts
           dwellMs: 4000,
+          enough: type === 'users' ? enoughUsers(limit) : enoughPosts(limit),
         });
 
         if (type === 'users') {
@@ -396,6 +422,11 @@ export function registerReadTools(server: McpServer): void {
       return withErrorHandling(async () => {
         const user = normalizeHandle(handle);
         const bodies = await threadsCapture(profileUrl(user), 'FriendshipsDialogUser', {
+          // The follower list is never server-rendered — it only arrives once
+          // the dialog opens — so the trigger always has to run here. The
+          // predicate still cuts the in-dialog scrolling short once we have
+          // enough rows.
+          enough: enoughUsers(limit),
           trigger: async (p) => {
             // The follower count is a clickable text (no anchor) that opens a
             // dialog; clicking it fires BarcelonaFriendshipsDialogUserQuery.
