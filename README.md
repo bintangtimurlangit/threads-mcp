@@ -9,7 +9,7 @@ An MCP server for **Meta's Threads** that acts as _your own account_ — read pr
 
 > **No developer account.** Unlike the official [Threads Graph API](https://developers.facebook.com/docs/threads) approach (which needs an app, OAuth, and an Instagram Business account), this server drives a **real logged-in browser session** using your own cookies.
 
-**Contents:** [Rate limits](#️-behave-for-rate-limits) · [Tools](#tools) · [Structured output](#structured-output) · [Media](#media) · [Scheduling](#scheduling) · [Setup](#setup) · [Run as a daemon](#running-as-a-persistent-daemon) · [Config](#configuration) · [How it works](#how-it-works) · [When things break](#when-things-break) · [Troubleshooting](#troubleshooting)
+**Contents:** [Rate limits](#️-behave-for-rate-limits) · [Tools](#tools) · [Prompts](#prompts-workflows-any-mcp-client) · [Skill](#agent-skill-claude-only) · [Structured output](#structured-output) · [Media](#media) · [Scheduling](#scheduling) · [Setup](#setup) · [Run as a daemon](#running-as-a-persistent-daemon) · [Config](#configuration) · [How it works](#how-it-works) · [When things break](#when-things-break) · [Troubleshooting](#troubleshooting)
 
 **Full reference:** [Documentation](./docs/README.md) · **Changelog:** [CHANGELOG.md](./CHANGELOG.md) · **Versioning & releases:** [docs/RELEASES.md](./docs/RELEASES.md)
 
@@ -121,6 +121,48 @@ The shapes are a small surface this project owns — deliberately **not** Meta's
 raw payloads, which reshuffle between app builds. Failures set `isError` and
 carry no structured content, so a failed call is never mistaken for an empty
 result.
+
+---
+
+## Prompts (workflows, any MCP client)
+
+Tools describe capabilities; **prompts** describe workflows — which tool to
+reach for, in what order, and what not to do. They're a first-class MCP
+primitive, so they work in any host: Claude Code surfaces them as slash
+commands (`/threads:catch_up`), others list them via `prompts/list`.
+
+| Prompt                 | What it runs                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------- |
+| `catch_up`             | Notifications + timeline digest, leading with anything awaiting a reply. Read-only.    |
+| `triage_notifications` | Sorts the Activity feed into needs-a-reply / acknowledge / ignore, and drafts replies. |
+| `draft_thread`         | Drafts a post or `chain`, voice-matched to your recent posts.                          |
+| `research_topic`       | Searches posts and users on a topic and reads the replies under them.                  |
+| `account_health`       | `whoami` + `doctor` — run this first when tools misbehave.                             |
+
+Every prompt **drafts and stops.** None of them publish: `draft_thread` will not
+call `create_thread`, and `triage_notifications` composes replies without
+sending them. They also carry this server's rate-limit discipline, which bare
+tool descriptions can't convey — writes hit a real account, and follow/like
+loops are what get accounts restricted.
+
+## Agent Skill (Claude only)
+
+Skills are a Claude-side mechanism — **not** part of MCP, so the server can't
+deliver one over the protocol. It ships in the package instead:
+
+```bash
+npx threads-mcp-install-skill              # ~/.claude/skills/threads-mcp
+npx threads-mcp-install-skill --project    # ./.claude/skills/threads-mcp
+```
+
+It covers what tool descriptions can't: which surface answers which question
+(`get_notifications` is the only inward-facing read — the one people forget),
+chaining tools through `structuredContent` rather than pattern-matching prose,
+why `limit` is a ceiling, and the failure modes in
+[`references/troubleshooting.md`](./skills/threads-mcp/references/troubleshooting.md).
+
+> Non-Claude hosts don't need it — the prompts above carry the same discipline
+> and require no installation.
 
 ---
 
