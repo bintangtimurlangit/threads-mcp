@@ -12,7 +12,7 @@
 // change.
 
 import { z } from 'zod';
-import type { ThreadsPost, ThreadsUser } from './types.js';
+import type { ThreadsPost, ThreadsUser, ActivityStory } from './types.js';
 import { postText, postLink, avatarUrl } from '../utils/format.js';
 import { BASE_URL } from '../browser/session.js';
 
@@ -82,6 +82,82 @@ export function toPost(p: ThreadsPost): PostOut {
     quoted: embedded
       ? { author: embedded.user?.username, text: postText(embedded), url: postLink(embedded) }
       : undefined,
+  };
+}
+
+export const NOTIFICATION_KINDS = [
+  'followed_you',
+  'you_followed',
+  'follow_suggestion',
+  'post_suggestion',
+  'reply',
+  'mention',
+  'like',
+  'repost',
+  'quote',
+  'other',
+] as const;
+
+export const NotificationSchema = z.object({
+  kind: z.enum(NOTIFICATION_KINDS).describe('Normalised category; "other" when unrecognised'),
+  label: z.string().describe('Threads\' own wording, e.g. "Followed you" — localised'),
+  actor: z.string().optional().describe('@handle of whoever triggered it'),
+  text: z.string().optional().describe('Post text, for entries about a post'),
+  post_code: z.string().optional().describe('Shortcode of the post, when there is one'),
+  url: z.string().optional().describe('Link to the post or profile the entry points at'),
+  at: z.string().optional().describe('ISO 8601 timestamp'),
+});
+export type NotificationOut = z.infer<typeof NotificationSchema>;
+
+/**
+ * Threads' numeric `story_type` → our category.
+ *
+ * Partial, and knowingly so: these codes were read off a live Activity feed, so
+ * only the kinds that account had actually received are mapped. Anything else
+ * falls through to 'other' — which is why `label` is always passed through
+ * verbatim and is the field to trust when `kind` is 'other'.
+ *
+ * Classifying on `label` instead would be worse: it's user-facing copy and
+ * therefore localised, so it changes with the account's language. `icon_name`
+ * is too coarse to help — it reports 'follow' for both "you followed them" and
+ * "they followed you".
+ */
+const STORY_TYPE_KINDS: Record<number, NotificationOut['kind']> = {
+  1304: 'follow_suggestion',
+  1305: 'you_followed',
+  995: 'post_suggestion',
+  21341: 'post_suggestion',
+};
+
+/** Project an Activity-feed story into the stable output shape. */
+export function toNotification(s: ActivityStory): NotificationOut {
+  const a = s.args ?? {};
+  const extra = a.extra ?? {};
+  const dest = a.destination ?? '';
+  const code = /[?&]shortcode=([A-Za-z0-9_-]+)/.exec(dest)?.[1];
+  const handle = /[?&]username=([A-Za-z0-9._]+)/.exec(dest)?.[1] ?? a.profile_name;
+
+  let kind: NotificationOut['kind'] =
+    (s.story_type !== undefined ? STORY_TYPE_KINDS[s.story_type] : undefined) ?? 'other';
+  // One case worth catching by wording: "followed you" and "you're now
+  // following" share an icon and differ only by story_type, and getting the
+  // direction backwards would be actively misleading.
+  if (kind === 'other' && /followed you/i.test(extra.context ?? '')) kind = 'followed_you';
+
+  return {
+    kind,
+    label: extra.context ?? '',
+    actor: a.profile_name,
+    text: extra.content || undefined,
+    post_code: code,
+    url: code
+      ? handle
+        ? `${BASE_URL}/@${handle}/post/${code}`
+        : `${BASE_URL}/post/${code}`
+      : handle
+        ? `${BASE_URL}/@${handle}`
+        : undefined,
+    at: a.timestamp ? new Date(a.timestamp * 1000).toISOString() : undefined,
   };
 }
 

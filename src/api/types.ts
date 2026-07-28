@@ -51,6 +51,32 @@ export interface ThreadsPost {
   has_liked?: boolean;
 }
 
+/**
+ * An entry in the Activity feed, as Threads ships it (`XDTActivityFeedStory`).
+ *
+ * The display string lives in `args.extra.context` ("Followed you", "Because
+ * you follow"), the actor in `args.profile_name`, and the target in
+ * `args.destination` — either `user?id=…&username=…` or
+ * `media?id=…&shortcode=…`.
+ */
+export interface ActivityStory {
+  __typename?: string;
+  story_type?: number;
+  args?: {
+    tuuid?: string;
+    timestamp?: number;
+    profile_name?: string;
+    destination?: string | null;
+    profile_image?: string | null;
+    extra?: {
+      context?: string;
+      content?: string;
+      icon_name?: string;
+      title?: string;
+    } | null;
+  };
+}
+
 /** One item within a thread (a root post or a reply in the chain). */
 export interface ThreadItem {
   post?: ThreadsPost;

@@ -3,12 +3,20 @@ import { z } from 'zod';
 import { threadsCapture, threadsUrl, profileUrl, normalizeHandle } from '../api/client.js';
 import { BASE_URL, resolveOwnHandle, currentUserId, isLoggedIn } from '../browser/session.js';
 import type { ThreadsUser } from '../api/types.js';
-import { extractPosts, extractUser, extractUsers } from '../api/extract.js';
+import { extractPosts, extractUser, extractUsers, extractActivity } from '../api/extract.js';
 import { cache } from '../utils/cache.js';
 import { withErrorHandling } from '../utils/errors.js';
-import { renderPost, renderProfile, renderUserLine } from '../utils/format.js';
+import { renderPost, renderProfile, renderUserLine, renderNotification } from '../utils/format.js';
 import { READ } from '../utils/annotations.js';
-import { PostSchema, UserSchema, toPost, toUser } from '../api/shape.js';
+import {
+  PostSchema,
+  UserSchema,
+  NotificationSchema,
+  NOTIFICATION_KINDS,
+  toPost,
+  toUser,
+  toNotification,
+} from '../api/shape.js';
 import type { TriggerContext } from '../browser/session.js';
 import type { Page } from 'playwright';
 
@@ -488,6 +496,68 @@ export function registerReadTools(server: McpServer): void {
           ...posts.map((p, i) => renderPost(p, { index: i + 1 })),
         ].join('\n\n');
         const structured = { posts: posts.map(toPost) };
+        cache.set(cacheKey, { text, structured });
+        return result(text, structured);
+      });
+    },
+  );
+
+  // ── get_notifications ────────────────────────────────────────────────────────
+  server.registerTool(
+    'get_notifications',
+    {
+      title: 'Get notifications',
+      description:
+        'Read your Threads Activity feed — who followed you, replies and mentions, and suggestions. ' +
+        'This is how you find out what happened on your account; every other read tool looks outward. ' +
+        'Optionally filter by `kind`.',
+      inputSchema: {
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .default(20)
+          .describe('Max entries (1-100, default 20)'),
+        kind: z
+          .enum(NOTIFICATION_KINDS)
+          .optional()
+          .describe(
+            'Only return this category. Filtering happens after fetching, because Threads ' +
+              'drives its Activity tabs from a popover rather than the URL.',
+          ),
+      },
+      outputSchema: { notifications: z.array(NotificationSchema) },
+      annotations: READ,
+    },
+    async ({ limit, kind }) => {
+      return withErrorHandling(async () => {
+        const cacheKey = cache.key('activity', limit, kind);
+        const cached = cache.get<Cached>(cacheKey);
+        if (cached) return result(cached.text, cached.structured);
+
+        const bodies = await threadsCapture(threadsUrl('/activity'), 'ActivityFeed', {
+          trigger: (p, ctx) => scrollFeed(p, Math.max(1, Math.ceil(limit / 12)), ctx),
+          triggerSkippable: true,
+          dwellMs: 4500,
+          // Count before filtering: a `kind` filter would otherwise keep us
+          // scrolling for entries of a type this account may never receive.
+          enough: (b) => extractActivity(b).length >= limit,
+        });
+
+        const all = extractActivity(bodies).map(toNotification);
+        const items = (kind ? all.filter((n) => n.kind === kind) : all).slice(0, limit);
+        if (items.length === 0) {
+          return result(kind ? `No "${kind}" activity found.` : 'No activity found.', {
+            notifications: [],
+          });
+        }
+        const text = [
+          `🔔 Activity${kind ? ` (${kind})` : ''}`,
+          '',
+          ...items.map((n, i) => renderNotification(n, i + 1)),
+        ].join('\n');
+        const structured = { notifications: items };
         cache.set(cacheKey, { text, structured });
         return result(text, structured);
       });
