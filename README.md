@@ -238,7 +238,8 @@ The browser runs **headed** (Meta detects headless); on a server use a virtual d
 
 ```bash
 npm run typecheck
-npm test             # live READ-only smoke test (needs login + a display)
+npm test             # unit tests (no browser, no login — runs in CI)
+npm run test:live    # live READ-only smoke test (needs login + a display)
 npm run dev          # tsx watch
 ```
 

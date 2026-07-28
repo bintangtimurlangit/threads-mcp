@@ -8,7 +8,7 @@ type TextResult = { content: Array<{ type: 'text'; text: string }> };
 const text = (t: string): TextResult => ({ content: [{ type: 'text', text: t }] });
 
 /** Parse a relative duration like "45s", "30m", "2h", "3d" → milliseconds. */
-function parseDuration(s: string): number | null {
+export function parseDuration(s: string): number | null {
   const m = s.trim().match(/^(\d+)\s*(s|sec|secs|m|min|mins|h|hr|hrs|hour|hours|d|day|days)$/i);
   if (!m) return null;
   const n = parseInt(m[1], 10);

@@ -4,17 +4,19 @@ Requires Node.js 20 or newer. CI covers Node.js 20, 22, and 24.
 
 ## Scripts
 
-| Command             | Description                                                 |
-| ------------------- | ----------------------------------------------------------- |
-| `npm install`       | Install dependencies (also fetches the CloakBrowser binary) |
-| `npm run login`     | One-time: open a browser window and log into Threads        |
-| `npm run build`     | Compile TypeScript to `build/` (`tsc`)                      |
-| `npm run dev`       | Watch mode: `tsx watch src/index.ts`                        |
-| `npm run start`     | Run compiled server: `node build/index.js`                  |
-| `npm run lint`      | ESLint over the repo                                        |
-| `npm run format`    | Prettier write; `npm run format:check` to verify            |
-| `npm run typecheck` | `tsc --noEmit`, strict, with unused-symbol checks           |
-| `npm test`          | **Live READ-only smoke test** — needs a login and a display |
+| Command             | Description                                                      |
+| ------------------- | ---------------------------------------------------------------- |
+| `npm install`       | Install dependencies (also fetches the CloakBrowser binary)      |
+| `npm run login`     | One-time: open a browser window and log into Threads             |
+| `npm run build`     | Compile TypeScript to `build/` (`tsc`)                           |
+| `npm run dev`       | Watch mode: `tsx watch src/index.ts`                             |
+| `npm run start`     | Run compiled server: `node build/index.js`                       |
+| `npm run lint`      | ESLint over the repo                                             |
+| `npm run format`    | Prettier write; `npm run format:check` to verify                 |
+| `npm run typecheck` | `tsc --noEmit`, strict, with unused-symbol checks                |
+| `npm test`          | Unit tests (extractors, formatting, parsing, cache) — no browser |
+| `npm run test:live` | **Live READ-only smoke test** — needs a login and a display      |
+| `npm run bench`     | Capture-latency harness against a local fixture page             |
 
 ## Project layout
 
@@ -39,7 +41,9 @@ src/
     format.ts       # serialization helpers
     ratelimit.ts    # write-action spacing
 test/
-  smoke.ts          # the npm test READ-only health check
+  smoke.ts          # the `npm run test:live` READ-only health check
+  capture-bench.ts  # latency harness for the capture path
+  unit/             # `npm test` — pure-function tests, no browser
 ```
 
 ## How the browser automation works
