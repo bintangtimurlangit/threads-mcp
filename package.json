@@ -1,6 +1,6 @@
 {
   "name": "@bintangtimurlangit/threads-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "An MCP server for Meta's Threads via a logged-in browser session — read profiles, posts, replies, timeline & search, and post/reply/like/repost/follow. No developer account: it uses your own cookie session.",
   "author": "bintangtimurlangit",
   "license": "MIT",
