@@ -14,6 +14,11 @@ import type { Page } from 'playwright';
 function parsePost(input: string): { handle?: string; code: string } | null {
   const m = input.match(/@([A-Za-z0-9._]+)\/post\/([A-Za-z0-9_-]+)/);
   if (m) return { handle: m[1], code: m[2] };
+  // Handle-less permalink, e.g. https://www.threads.com/post/ABC123 — Threads
+  // serves these and they show up in shares, so recover the code rather than
+  // falling through and losing it.
+  const bare = input.match(/\/post\/([A-Za-z0-9_-]+)/);
+  if (bare) return { code: bare[1] };
   // Bare shortcode (no handle) — still loadable via /post/<code>.
   if (/^[A-Za-z0-9_-]{6,}$/.test(input.trim())) return { code: input.trim() };
   return null;
@@ -250,7 +255,18 @@ export function registerReadTools(server: McpServer): void {
           dwellMs: 4000,
         });
         const all = extractPosts(bodies);
-        const replies = all.filter((p) => p.code !== parsed.code).slice(0, limit);
+        // Identify the root post so it isn't reported as a reply to itself.
+        // Filtering on `p.code !== parsed.code` alone breaks when the caller
+        // passed a URL we couldn't parse a code out of: every post then
+        // compares unequal to `undefined` and the root survives the filter.
+        // Fall back to the first non-reply (the heuristic get_thread uses),
+        // then to document order, and compare by identity so a missing code
+        // can never make the comparison vacuously true.
+        const root =
+          (parsed.code ? all.find((p) => p.code === parsed.code) : undefined) ??
+          all.find((p) => !p.text_post_app_info?.is_reply) ??
+          all[0];
+        const replies = all.filter((p) => p !== root).slice(0, limit);
         if (replies.length === 0) {
           return {
             content: [{ type: 'text', text: 'No replies found (or replies are restricted).' }],
