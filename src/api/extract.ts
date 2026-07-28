@@ -5,7 +5,7 @@
 // recognizable leaf objects: `post` nodes and `user` nodes. Order is preserved
 // (DFS) so a profile/feed reads top-to-bottom, and we de-dupe by id.
 
-import type { ThreadsPost, ThreadsUser } from './types.js';
+import type { ThreadsPost, ThreadsUser, ActivityStory } from './types.js';
 
 type Json = unknown;
 
@@ -116,6 +116,30 @@ export function extractUser(bodies: Json[], username?: string): ThreadsUser | un
     });
   }
   return best;
+}
+
+/**
+ * Collect Activity-feed entries, newest first, de-duped by their `tuuid`.
+ *
+ * Matched on `__typename === 'XDTActivityFeedStory'` rather than by shape: these
+ * carry no `code`/`caption`, so the post and user heuristics don't apply, and
+ * the typename is what the payload actually labels them with.
+ */
+export function extractActivity(bodies: Json[]): ActivityStory[] {
+  const out: ActivityStory[] = [];
+  const seen = new Set<string>();
+  for (const body of bodies) {
+    walk(body, (o) => {
+      if (o.__typename !== 'XDTActivityFeedStory') return;
+      const s = o as ActivityStory;
+      const k = s.args?.tuuid ?? `${s.args?.timestamp}:${s.args?.profile_name}`;
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push(s);
+      return false; // the story owns its nested user/post objects
+    });
+  }
+  return out.sort((a, b) => (b.args?.timestamp ?? 0) - (a.args?.timestamp ?? 0));
 }
 
 /** Collect all distinct users across the bodies (for followers / search). */

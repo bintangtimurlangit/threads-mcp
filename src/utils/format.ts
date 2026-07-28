@@ -1,4 +1,5 @@
 import type { ThreadsPost, ThreadsUser } from '../api/types.js';
+import type { NotificationOut } from '../api/shape.js';
 import { BASE_URL } from '../browser/session.js';
 import { compact, truncate } from './errors.js';
 
@@ -99,5 +100,32 @@ export function renderProfile(u: ThreadsUser): string {
   if (stats.length) lines.push('', stats.join('  ·  '));
   if (u.pk) lines.push('', `id: \`${u.pk}\``);
   if (u.username) lines.push(`🔗 ${BASE_URL}/@${u.username}`);
+  return lines.join('\n');
+}
+
+const NOTIFICATION_ICON: Record<string, string> = {
+  followed_you: '➕',
+  you_followed: '👤',
+  follow_suggestion: '💡',
+  post_suggestion: '💡',
+  reply: '💬',
+  mention: '📣',
+  like: '❤️',
+  repost: '🔁',
+  quote: '❝',
+  other: '🔔',
+};
+
+/** One activity entry as a compact line (plus the post text, when it has one). */
+export function renderNotification(n: NotificationOut, index?: number): string {
+  const icon = NOTIFICATION_ICON[n.kind] ?? '🔔';
+  const when = n.at ? relativeTime(Math.floor(Date.parse(n.at) / 1000)) : '';
+  // `label` is Threads' own wording and is localised; fall back to our own
+  // category name only when it is missing.
+  const what = n.label || n.kind.replace(/_/g, ' ');
+  const head = `${index ? `${index}. ` : ''}${icon} **@${n.actor ?? 'someone'}** — ${what}${when ? ` · ${when}` : ''}`;
+  const lines = [head];
+  if (n.text) lines.push(`   ${truncate(n.text.replace(/\n+/g, ' '), 160)}`);
+  if (n.url) lines.push(`   ↳ ${n.url}`);
   return lines.join('\n');
 }
