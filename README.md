@@ -47,15 +47,15 @@ You are automating a **real Threads account**. Meta rate-limits aggressively and
 
 ### Write &nbsp;(rate-limited — real account)
 
-| Tool                                | Action                                                      |
-| ----------------------------------- | ----------------------------------------------------------- |
-| `create_thread`                     | Post a new thread — text and/or media.                      |
-| `reply_to_thread`                   | Reply to a post — text and/or media.                        |
-| `quote_thread`                      | Quote-post (repost with your own comment + optional media). |
-| `delete_thread`                     | Delete one of your own posts (permanent).                   |
-| `like_thread` / `unlike_thread`     | Like / remove a like.                                       |
-| `repost_thread` / `unrepost_thread` | Repost / remove a repost.                                   |
-| `follow_user` / `unfollow_user`     | Follow / unfollow a user.                                   |
+| Tool                                | Action                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------- |
+| `create_thread`                     | Post a new thread — text and/or media, optionally a multi-post `chain`. |
+| `reply_to_thread`                   | Reply to a post — text and/or media.                                    |
+| `quote_thread`                      | Quote-post (repost with your own comment + optional media).             |
+| `delete_thread`                     | Delete one of your own posts (permanent).                               |
+| `like_thread` / `unlike_thread`     | Like / remove a like.                                                   |
+| `repost_thread` / `unrepost_thread` | Repost / remove a repost.                                               |
+| `follow_user` / `unfollow_user`     | Follow / unfollow a user.                                               |
 
 ### Schedule
 
@@ -100,6 +100,22 @@ reply_to_thread { "handle": "someone", "code": "ABC123", "media": ["reaction.png
 // quote with a comment + image
 quote_thread { "url": "https://www.threads.com/@x/post/ABC", "text": "this 👇", "media": ["chart.png"] }
 ```
+
+### Multi-post threads
+
+`create_thread` takes an optional `chain` — extra posts published as one
+connected thread, the format Threads calls "Add to thread". Posting them
+separately instead produces unlinked standalone threads.
+
+```jsonc
+create_thread {
+  "text": "Three things I learned shipping this 🧵",
+  "chain": ["1. Meta detects headless.", "2. Cache invalidation is still hard.", "3. Ship it."]
+}
+```
+
+On your profile a chain appears as a **single** entry; the later parts are
+reachable via `get_thread_replies` on the first post.
 
 ---
 
