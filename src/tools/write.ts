@@ -9,6 +9,7 @@ import { threadsUrl, normalizeHandle } from '../api/client.js';
 import { BASE_URL, onPage, isLoggedIn } from '../browser/session.js';
 import { withErrorHandling } from '../utils/errors.js';
 import { throttleWrite, rateLimitReminder } from '../utils/ratelimit.js';
+import { WRITE_CREATES, WRITE_TOGGLES, WRITE_DESTRUCTIVE } from '../utils/annotations.js';
 import { ThreadsAuthRequiredError, ThreadsAPIError } from '../api/client.js';
 
 type TextResult = { content: Array<{ type: 'text'; text: string }> };
@@ -374,24 +375,29 @@ export async function publishThread(opts: { text?: string; media?: string[] }): 
 
 export function registerWriteTools(server: McpServer): void {
   // ── create_thread ──────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'create_thread',
-    'Post a new thread to YOUR Threads account — text and/or media (images & video). ⚠️ Real account — ' +
-      'use sparingly; the server enforces a minimum gap between writes to avoid rate-limit/automation flags.',
     {
-      text: z
-        .string()
-        .max(500)
-        .optional()
-        .describe('The post text (max 500 chars). Optional if media is given.'),
-      media: z
-        .array(z.string())
-        .max(20)
-        .optional()
-        .describe(
-          'Local file paths and/or http(s) URLs to attach. Images (jpg/png/webp/avif) and/or video ' +
-            '(mp4/mov/webm). Multiple images post as a carousel. Optional if text is given.',
-        ),
+      title: 'Post a thread',
+      description:
+        'Post a new thread to YOUR Threads account — text and/or media (images & video). ⚠️ Real account — ' +
+        'use sparingly; the server enforces a minimum gap between writes to avoid rate-limit/automation flags.',
+      inputSchema: {
+        text: z
+          .string()
+          .max(500)
+          .optional()
+          .describe('The post text (max 500 chars). Optional if media is given.'),
+        media: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe(
+            'Local file paths and/or http(s) URLs to attach. Images (jpg/png/webp/avif) and/or video ' +
+              '(mp4/mov/webm). Multiple images post as a carousel. Optional if text is given.',
+          ),
+      },
+      annotations: WRITE_CREATES,
     },
     async ({ text, media }) => {
       return withErrorHandling(async () => ok(await publishThread({ text, media })));
@@ -399,26 +405,31 @@ export function registerWriteTools(server: McpServer): void {
   );
 
   // ── reply_to_thread ────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'reply_to_thread',
-    'Reply to a Threads post with text and/or media. Provide the post `url`, or `handle` + `code`. ' +
-      '⚠️ Real account — rate-limited.',
     {
-      text: z
-        .string()
-        .max(500)
-        .optional()
-        .describe('Your reply text (max 500 chars). Optional if media is given.'),
-      media: z
-        .array(z.string())
-        .max(20)
-        .optional()
-        .describe(
-          'Local file paths and/or http(s) URLs — images (jpg/png/webp/avif) and/or video (mp4/mov/webm).',
-        ),
-      url: z.string().optional().describe('Full post URL to reply to'),
-      handle: z.string().optional().describe('Author @username (if not using url)'),
-      code: z.string().optional().describe('Post shortcode (if not using url)'),
+      title: 'Reply to a post',
+      description:
+        'Reply to a Threads post with text and/or media. Provide the post `url`, or `handle` + `code`. ' +
+        '⚠️ Real account — rate-limited.',
+      inputSchema: {
+        text: z
+          .string()
+          .max(500)
+          .optional()
+          .describe('Your reply text (max 500 chars). Optional if media is given.'),
+        media: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe(
+            'Local file paths and/or http(s) URLs — images (jpg/png/webp/avif) and/or video (mp4/mov/webm).',
+          ),
+        url: z.string().optional().describe('Full post URL to reply to'),
+        handle: z.string().optional().describe('Author @username (if not using url)'),
+        code: z.string().optional().describe('Post shortcode (if not using url)'),
+      },
+      annotations: WRITE_CREATES,
     },
     async ({ text, media, url, handle, code }) => {
       return withErrorHandling(async () => {
@@ -493,13 +504,18 @@ export function registerWriteTools(server: McpServer): void {
   );
 
   // ── like_thread ────────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'like_thread',
-    'Like a Threads post. Provide the post `url`, or `handle` + `code`. ⚠️ Real account — rate-limited.',
     {
-      url: z.string().optional().describe('Full post URL'),
-      handle: z.string().optional().describe('Author @username (if not using url)'),
-      code: z.string().optional().describe('Post shortcode (if not using url)'),
+      title: 'Like a post',
+      description:
+        'Like a Threads post. Provide the post `url`, or `handle` + `code`. ⚠️ Real account — rate-limited.',
+      inputSchema: {
+        url: z.string().optional().describe('Full post URL'),
+        handle: z.string().optional().describe('Author @username (if not using url)'),
+        code: z.string().optional().describe('Post shortcode (if not using url)'),
+      },
+      annotations: WRITE_TOGGLES,
     },
     async ({ url, handle, code }) => {
       return withErrorHandling(async () => {
@@ -533,14 +549,19 @@ export function registerWriteTools(server: McpServer): void {
   );
 
   // ── repost_thread ──────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'repost_thread',
-    'Repost a Threads post to your followers. Provide the post `url`, or `handle` + `code`. ' +
-      '⚠️ Real account — rate-limited.',
     {
-      url: z.string().optional().describe('Full post URL'),
-      handle: z.string().optional().describe('Author @username (if not using url)'),
-      code: z.string().optional().describe('Post shortcode (if not using url)'),
+      title: 'Repost a post',
+      description:
+        'Repost a Threads post to your followers. Provide the post `url`, or `handle` + `code`. ' +
+        '⚠️ Real account — rate-limited.',
+      inputSchema: {
+        url: z.string().optional().describe('Full post URL'),
+        handle: z.string().optional().describe('Author @username (if not using url)'),
+        code: z.string().optional().describe('Post shortcode (if not using url)'),
+      },
+      annotations: WRITE_TOGGLES,
     },
     async ({ url, handle, code }) => {
       return withErrorHandling(async () => {
@@ -582,24 +603,29 @@ export function registerWriteTools(server: McpServer): void {
   );
 
   // ── quote_thread ────────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'quote_thread',
-    'Quote-post a Threads post — repost it with your own comment (text and/or media). Provide the post ' +
-      '`url`, or `handle` + `code`, plus your `text` and/or `media`. ⚠️ Real account — rate-limited.',
     {
-      text: z
-        .string()
-        .max(500)
-        .optional()
-        .describe('Your comment on the quoted post (max 500 chars).'),
-      media: z
-        .array(z.string())
-        .max(20)
-        .optional()
-        .describe('Local file paths and/or http(s) URLs to attach to your quote.'),
-      url: z.string().optional().describe('Full URL of the post to quote'),
-      handle: z.string().optional().describe('Author @username (if not using url)'),
-      code: z.string().optional().describe('Post shortcode (if not using url)'),
+      title: 'Quote a post',
+      description:
+        'Quote-post a Threads post — repost it with your own comment (text and/or media). Provide the post ' +
+        '`url`, or `handle` + `code`, plus your `text` and/or `media`. ⚠️ Real account — rate-limited.',
+      inputSchema: {
+        text: z
+          .string()
+          .max(500)
+          .optional()
+          .describe('Your comment on the quoted post (max 500 chars).'),
+        media: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe('Local file paths and/or http(s) URLs to attach to your quote.'),
+        url: z.string().optional().describe('Full URL of the post to quote'),
+        handle: z.string().optional().describe('Author @username (if not using url)'),
+        code: z.string().optional().describe('Post shortcode (if not using url)'),
+      },
+      annotations: WRITE_CREATES,
     },
     async ({ text, media, url, handle, code }) => {
       return withErrorHandling(async () => {
@@ -659,12 +685,17 @@ export function registerWriteTools(server: McpServer): void {
   );
 
   // ── follow_user ────────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'follow_user',
-    'Follow a Threads user by @handle. ⚠️ Real account — follow/unfollow bursts are a classic ban ' +
-      'trigger, so this is rate-limited.',
     {
-      handle: z.string().describe('The @username to follow'),
+      title: 'Follow a user',
+      description:
+        'Follow a Threads user by @handle. ⚠️ Real account — follow/unfollow bursts are a classic ban ' +
+        'trigger, so this is rate-limited.',
+      inputSchema: {
+        handle: z.string().describe('The @username to follow'),
+      },
+      annotations: WRITE_TOGGLES,
     },
     async ({ handle }) => {
       return withErrorHandling(async () => {
@@ -709,13 +740,18 @@ export function registerWriteTools(server: McpServer): void {
   );
 
   // ── delete_thread ──────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'delete_thread',
-    'Delete one of YOUR OWN Threads posts. Provide the post `url`, or `handle` + `code`. This is permanent.',
     {
-      url: z.string().optional().describe('Full post URL (must be your own post)'),
-      handle: z.string().optional().describe('Your @username (if not using url)'),
-      code: z.string().optional().describe('Post shortcode (if not using url)'),
+      title: 'Delete a post',
+      description:
+        'Delete one of YOUR OWN Threads posts. Provide the post `url`, or `handle` + `code`. This is permanent.',
+      inputSchema: {
+        url: z.string().optional().describe('Full post URL (must be your own post)'),
+        handle: z.string().optional().describe('Your @username (if not using url)'),
+        code: z.string().optional().describe('Post shortcode (if not using url)'),
+      },
+      annotations: WRITE_DESTRUCTIVE,
     },
     async ({ url, handle, code }) => {
       return withErrorHandling(async () => {
@@ -747,13 +783,18 @@ export function registerWriteTools(server: McpServer): void {
   );
 
   // ── unlike_thread ──────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'unlike_thread',
-    'Remove your like from a Threads post. Provide the post `url`, or `handle` + `code`. ⚠️ Real account — rate-limited.',
     {
-      url: z.string().optional().describe('Full post URL'),
-      handle: z.string().optional().describe('Author @username (if not using url)'),
-      code: z.string().optional().describe('Post shortcode (if not using url)'),
+      title: 'Unlike a post',
+      description:
+        'Remove your like from a Threads post. Provide the post `url`, or `handle` + `code`. ⚠️ Real account — rate-limited.',
+      inputSchema: {
+        url: z.string().optional().describe('Full post URL'),
+        handle: z.string().optional().describe('Author @username (if not using url)'),
+        code: z.string().optional().describe('Post shortcode (if not using url)'),
+      },
+      annotations: WRITE_TOGGLES,
     },
     async ({ url, handle, code }) => {
       return withErrorHandling(async () => {
@@ -786,13 +827,18 @@ export function registerWriteTools(server: McpServer): void {
   );
 
   // ── unrepost_thread ──────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'unrepost_thread',
-    'Remove your repost of a Threads post. Provide the post `url`, or `handle` + `code`. ⚠️ Real account — rate-limited.',
     {
-      url: z.string().optional().describe('Full post URL'),
-      handle: z.string().optional().describe('Author @username (if not using url)'),
-      code: z.string().optional().describe('Post shortcode (if not using url)'),
+      title: 'Remove a repost',
+      description:
+        'Remove your repost of a Threads post. Provide the post `url`, or `handle` + `code`. ⚠️ Real account — rate-limited.',
+      inputSchema: {
+        url: z.string().optional().describe('Full post URL'),
+        handle: z.string().optional().describe('Author @username (if not using url)'),
+        code: z.string().optional().describe('Post shortcode (if not using url)'),
+      },
+      annotations: WRITE_TOGGLES,
     },
     async ({ url, handle, code }) => {
       return withErrorHandling(async () => {
@@ -824,12 +870,17 @@ export function registerWriteTools(server: McpServer): void {
   );
 
   // ── unfollow_user ────────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'unfollow_user',
-    'Unfollow a Threads user by @handle. ⚠️ Real account — follow/unfollow bursts are a classic ban ' +
-      'trigger, so this is rate-limited.',
     {
-      handle: z.string().describe('The @username to unfollow'),
+      title: 'Unfollow a user',
+      description:
+        'Unfollow a Threads user by @handle. ⚠️ Real account — follow/unfollow bursts are a classic ban ' +
+        'trigger, so this is rate-limited.',
+      inputSchema: {
+        handle: z.string().describe('The @username to unfollow'),
+      },
+      annotations: WRITE_TOGGLES,
     },
     async ({ handle }) => {
       return withErrorHandling(async () => {
