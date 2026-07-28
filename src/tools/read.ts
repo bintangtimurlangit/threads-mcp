@@ -92,6 +92,16 @@ interface Cached {
   structured: Structured;
 }
 
+/*
+ * Note on scroll rounds: every feed-like surface gets a trigger, even for small
+ * limits. It used to be gated on `limit > 8`, assuming the first render always
+ * carries at least eight items — but search results arrive lazily, so a
+ * `limit: 5` search skipped scrolling entirely and returned whatever single
+ * result had landed. Handing the trigger over unconditionally is now free:
+ * `triggerSkippable` drops it when the embedded payload already suffices, and
+ * `scrollFeed` returns immediately once `ctx.enough()` is true.
+ */
+
 /**
  * "Stop as soon as we have `limit` posts." Passed to the capture layer so a
  * request that the server-rendered HTML already satisfies costs one page load
@@ -232,7 +242,7 @@ export function registerReadTools(server: McpServer): void {
         if (cached) return result(cached.text, cached.structured);
 
         const bodies = await threadsCapture(profileUrl(user), 'ProfileThreadsTab', {
-          trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
+          trigger: (p, ctx) => scrollFeed(p, Math.max(1, Math.ceil(limit / 8)), ctx),
           triggerSkippable: true, // scrolling just fetches more of the same posts
           dwellMs: 4000,
           // Count only this user's posts: a profile page also embeds
@@ -389,7 +399,7 @@ export function registerReadTools(server: McpServer): void {
         if (cached) return result(cached.text, cached.structured);
 
         const bodies = await threadsCapture(`${BASE_URL}/`, 'FeedDirect', {
-          trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
+          trigger: (p, ctx) => scrollFeed(p, Math.max(1, Math.ceil(limit / 8)), ctx),
           triggerSkippable: true, // scrolling just fetches more of the same posts
           dwellMs: 5000,
           enough: enoughPosts(limit),
@@ -451,7 +461,7 @@ export function registerReadTools(server: McpServer): void {
         const filter = type === 'users' ? '&serp_type=default' : '';
         const searchUrl = threadsUrl(`/search?q=${q}${filter}`);
         const bodies = await threadsCapture(searchUrl, 'Search', {
-          trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
+          trigger: (p, ctx) => scrollFeed(p, Math.max(1, Math.ceil(limit / 8)), ctx),
           triggerSkippable: true, // scrolling just fetches more of the same posts
           dwellMs: 4000,
           enough: type === 'users' ? enoughUsers(limit) : enoughPosts(limit),
