@@ -126,6 +126,16 @@ export function withLock<T>(fn: () => Promise<T>, label = 'browser operation'): 
   return run;
 }
 
+/** What a trigger can ask the capture layer mid-run. */
+export interface TriggerContext {
+  /**
+   * Has `BatchOptions.enough` been satisfied by what's landed so far? Lets a
+   * scroll loop stop the moment it has the requested number of items instead
+   * of running a fixed iteration count.
+   */
+  enough: () => boolean;
+}
+
 export interface BatchOptions {
   /**
    * Preferred GraphQL operation, matched against the request's
@@ -240,7 +250,7 @@ async function harvestEmbedded(page: Page): Promise<unknown[]> {
 export async function captureGraphqlBatch<T = unknown>(
   pageUrl: string,
   opts: BatchOptions = {},
-  trigger?: (page: Page) => Promise<void>,
+  trigger?: (page: Page, ctx: TriggerContext) => Promise<void>,
 ): Promise<T[]> {
   const timeoutMs = opts.timeoutMs ?? 30000;
   const dwellMs = opts.dwellMs ?? 3500;
@@ -277,8 +287,11 @@ export async function captureGraphqlBatch<T = unknown>(
         return [...embedded, ...named.map((b) => b.json), ...rest.map((b) => b.json)] as T[];
       };
 
-      // Re-running the predicate on an unchanged body set just burns CPU, so only
-      // re-check when something new has actually landed.
+      /** Unconditional check — for triggers that ask at their own pace. */
+      const isEnough = (): boolean => (opts.enough ? opts.enough(order() as unknown[]) : false);
+
+      // Re-running the predicate on an unchanged body set just burns CPU, so the
+      // poll loop only re-checks when something new has actually landed.
       let lastChecked = -1;
       const satisfied = (): boolean => {
         if (!opts.enough) return false;
@@ -308,7 +321,7 @@ export async function captureGraphqlBatch<T = unknown>(
           debug('satisfied by embedded payload — skipping trigger and dwell');
         } else {
           if (trigger) {
-            await trigger(page);
+            await trigger(page, { enough: isEnough });
             // The trigger may have navigated or forced more server-rendered
             // content in; re-read and replace rather than append, so identical
             // blocks aren't parsed and walked twice.

@@ -8,6 +8,7 @@ import { cache } from '../utils/cache.js';
 import { withErrorHandling } from '../utils/errors.js';
 import { renderPost, renderProfile, renderUserLine } from '../utils/format.js';
 import { READ } from '../utils/annotations.js';
+import type { TriggerContext } from '../browser/session.js';
 import type { Page } from 'playwright';
 
 /** Parse a Threads post URL → { handle, code }. Accepts a bare code too. */
@@ -30,11 +31,28 @@ async function dropSelf(users: ThreadsUser[]): Promise<ThreadsUser[]> {
   return me ? users.filter((u) => u.username?.toLowerCase() !== me) : users;
 }
 
-/** Scroll the page a few times to make Threads load more items. */
-async function scrollFeed(page: Page, times: number): Promise<void> {
+/**
+ * Scroll to make Threads load more items, at most `times` rounds.
+ *
+ * Three things end the loop early, in order of how often they fire:
+ *   • `ctx.enough()` — we already have what the caller asked for;
+ *   • no pagination request followed the scroll — the feed is exhausted, and
+ *     scrolling a finished list just burns the remaining rounds;
+ *   • the per-round cap, for a page that is simply slow.
+ *
+ * Waiting on the request rather than sleeping a flat 1.2s is what makes the
+ * common case quick: pagination usually answers in a few hundred ms.
+ */
+async function scrollFeed(page: Page, times: number, ctx?: TriggerContext): Promise<void> {
   for (let i = 0; i < times; i++) {
+    if (ctx?.enough()) return;
     await page.mouse.wheel(0, 2400);
-    await page.waitForTimeout(1200);
+    const paginated = await page
+      .waitForResponse((r) => r.url().includes('graphql'), { timeout: 2500 })
+      .then(() => true)
+      .catch(() => false);
+    if (!paginated) return; // nothing more to load
+    await page.waitForTimeout(200); // let the response body parse and render
   }
 }
 
@@ -175,7 +193,7 @@ export function registerReadTools(server: McpServer): void {
       return withErrorHandling(async () => {
         const user = normalizeHandle(handle);
         const bodies = await threadsCapture(profileUrl(user), 'ProfileThreadsTab', {
-          trigger: limit > 8 ? (p) => scrollFeed(p, Math.ceil(limit / 8)) : undefined,
+          trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
           triggerSkippable: true, // scrolling just fetches more of the same posts
           dwellMs: 4000,
           // Count only this user's posts: a profile page also embeds
@@ -270,7 +288,7 @@ export function registerReadTools(server: McpServer): void {
           };
         }
         const bodies = await threadsCapture(parsed.pageUrl, 'PostPage', {
-          trigger: (p) => scrollFeed(p, Math.ceil(limit / 8)),
+          trigger: (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx),
           triggerSkippable: true, // scrolling just fetches more replies
           dwellMs: 4000,
           // +1 for the root post, which isn't a reply.
@@ -318,7 +336,7 @@ export function registerReadTools(server: McpServer): void {
     async ({ limit }) => {
       return withErrorHandling(async () => {
         const bodies = await threadsCapture(`${BASE_URL}/`, 'FeedDirect', {
-          trigger: limit > 8 ? (p) => scrollFeed(p, Math.ceil(limit / 8)) : undefined,
+          trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
           triggerSkippable: true, // scrolling just fetches more of the same posts
           dwellMs: 5000,
           enough: enoughPosts(limit),
@@ -367,7 +385,7 @@ export function registerReadTools(server: McpServer): void {
         const filter = type === 'users' ? '&serp_type=default' : '';
         const searchUrl = threadsUrl(`/search?q=${q}${filter}`);
         const bodies = await threadsCapture(searchUrl, 'Search', {
-          trigger: limit > 8 ? (p) => scrollFeed(p, Math.ceil(limit / 8)) : undefined,
+          trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
           triggerSkippable: true, // scrolling just fetches more of the same posts
           dwellMs: 4000,
           enough: type === 'users' ? enoughUsers(limit) : enoughPosts(limit),
