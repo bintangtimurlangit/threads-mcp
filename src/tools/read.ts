@@ -7,6 +7,7 @@ import { extractPosts, extractUser, extractUsers } from '../api/extract.js';
 import { cache } from '../utils/cache.js';
 import { withErrorHandling } from '../utils/errors.js';
 import { renderPost, renderProfile, renderUserLine } from '../utils/format.js';
+import { READ } from '../utils/annotations.js';
 import type { Page } from 'playwright';
 
 /** Parse a Threads post URL → { handle, code }. Accepts a bare code too. */
@@ -34,11 +35,16 @@ async function scrollFeed(page: Page, times: number): Promise<void> {
 
 export function registerReadTools(server: McpServer): void {
   // ── whoami ─────────────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'whoami',
-    'Show which Threads account this server is signed in as (your @handle, user id, name, follower/following counts). ' +
-      'Use this to confirm the active session before posting.',
-    {},
+    {
+      title: 'Who am I',
+      description:
+        'Show which Threads account this server is signed in as (your @handle, user id, name, follower/following counts). ' +
+        'Use this to confirm the active session before posting.',
+      inputSchema: {},
+      annotations: READ,
+    },
     async () => {
       return withErrorHandling(async () => {
         if (!(await isLoggedIn())) {
@@ -74,15 +80,20 @@ export function registerReadTools(server: McpServer): void {
   );
 
   // ── get_profile ──────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'get_profile',
-    "Get a Threads user's profile: display name, bio, follower count, verified status, and a few recent posts. " +
-      'Omit `handle` to get your own profile.',
     {
-      handle: z
-        .string()
-        .optional()
-        .describe('The @username (with or without @). Omit for your own profile.'),
+      title: 'Get profile',
+      description:
+        "Get a Threads user's profile: display name, bio, follower count, verified status, and a few recent posts. " +
+        'Omit `handle` to get your own profile.',
+      inputSchema: {
+        handle: z
+          .string()
+          .optional()
+          .describe('The @username (with or without @). Omit for your own profile.'),
+      },
+      annotations: READ,
     },
     async ({ handle }) => {
       return withErrorHandling(async () => {
@@ -130,12 +141,16 @@ export function registerReadTools(server: McpServer): void {
   );
 
   // ── get_user_threads ─────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'get_user_threads',
-    "Get a user's recent Threads posts (their profile feed).",
     {
-      handle: z.string().describe('The @username whose posts to fetch'),
-      limit: z.number().int().min(1).max(50).default(15).describe('Max posts (1-50, default 15)'),
+      title: 'Get user posts',
+      description: "Get a user's recent Threads posts (their profile feed).",
+      inputSchema: {
+        handle: z.string().describe('The @username whose posts to fetch'),
+        limit: z.number().int().min(1).max(50).default(15).describe('Max posts (1-50, default 15)'),
+      },
+      annotations: READ,
     },
     async ({ handle, limit }) => {
       return withErrorHandling(async () => {
@@ -161,16 +176,21 @@ export function registerReadTools(server: McpServer): void {
   );
 
   // ── get_thread ────────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'get_thread',
-    'Get a single Threads post with its stats. Provide the post `url`, or `handle` + `code`.',
     {
-      url: z
-        .string()
-        .optional()
-        .describe('Full post URL, e.g. https://www.threads.com/@user/post/ABC123'),
-      handle: z.string().optional().describe('Author @username (if not using url)'),
-      code: z.string().optional().describe('Post shortcode (if not using url)'),
+      title: 'Get a post',
+      description:
+        'Get a single Threads post with its stats. Provide the post `url`, or `handle` + `code`.',
+      inputSchema: {
+        url: z
+          .string()
+          .optional()
+          .describe('Full post URL, e.g. https://www.threads.com/@user/post/ABC123'),
+        handle: z.string().optional().describe('Author @username (if not using url)'),
+        code: z.string().optional().describe('Post shortcode (if not using url)'),
+      },
+      annotations: READ,
     },
     async ({ url, handle, code }) => {
       return withErrorHandling(async () => {
@@ -197,14 +217,25 @@ export function registerReadTools(server: McpServer): void {
   );
 
   // ── get_thread_replies ─────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'get_thread_replies',
-    'Get the replies to a Threads post. Provide the post `url`, or `handle` + `code`.',
     {
-      url: z.string().optional().describe('Full post URL'),
-      handle: z.string().optional().describe('Author @username (if not using url)'),
-      code: z.string().optional().describe('Post shortcode (if not using url)'),
-      limit: z.number().int().min(1).max(50).default(15).describe('Max replies (1-50, default 15)'),
+      title: 'Get post replies',
+      description:
+        'Get the replies to a Threads post. Provide the post `url`, or `handle` + `code`.',
+      inputSchema: {
+        url: z.string().optional().describe('Full post URL'),
+        handle: z.string().optional().describe('Author @username (if not using url)'),
+        code: z.string().optional().describe('Post shortcode (if not using url)'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(50)
+          .default(15)
+          .describe('Max replies (1-50, default 15)'),
+      },
+      annotations: READ,
     },
     async ({ url, handle, code, limit }) => {
       return withErrorHandling(async () => {
@@ -236,11 +267,15 @@ export function registerReadTools(server: McpServer): void {
   );
 
   // ── get_timeline ───────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'get_timeline',
-    'Get your Threads home feed (the "For you" timeline).',
     {
-      limit: z.number().int().min(1).max(50).default(15).describe('Max posts (1-50, default 15)'),
+      title: 'Get home timeline',
+      description: 'Get your Threads home feed (the "For you" timeline).',
+      inputSchema: {
+        limit: z.number().int().min(1).max(50).default(15).describe('Max posts (1-50, default 15)'),
+      },
+      annotations: READ,
     },
     async ({ limit }) => {
       return withErrorHandling(async () => {
@@ -265,16 +300,26 @@ export function registerReadTools(server: McpServer): void {
   );
 
   // ── search ─────────────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'search',
-    'Search Threads for posts or users matching a query.',
     {
-      query: z.string().min(1).describe('The search text'),
-      type: z
-        .enum(['posts', 'users'])
-        .default('posts')
-        .describe('What to search for (default: posts)'),
-      limit: z.number().int().min(1).max(50).default(15).describe('Max results (1-50, default 15)'),
+      title: 'Search Threads',
+      description: 'Search Threads for posts or users matching a query.',
+      inputSchema: {
+        query: z.string().min(1).describe('The search text'),
+        type: z
+          .enum(['posts', 'users'])
+          .default('posts')
+          .describe('What to search for (default: posts)'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(50)
+          .default(15)
+          .describe('Max results (1-50, default 15)'),
+      },
+      annotations: READ,
     },
     async ({ query, type, limit }) => {
       return withErrorHandling(async () => {
@@ -312,19 +357,24 @@ export function registerReadTools(server: McpServer): void {
   );
 
   // ── get_followers ────────────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'get_followers',
-    "Get a sample of a user's followers (opens the followers list and reads what loads). " +
-      'Threads does not expose a full follower dump; expect a partial list.',
     {
-      handle: z.string().describe('The @username whose followers to list'),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(100)
-        .default(30)
-        .describe('Max followers (1-100, default 30)'),
+      title: 'Get followers',
+      description:
+        "Get a sample of a user's followers (opens the followers list and reads what loads). " +
+        'Threads does not expose a full follower dump; expect a partial list.',
+      inputSchema: {
+        handle: z.string().describe('The @username whose followers to list'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .default(30)
+          .describe('Max followers (1-100, default 30)'),
+      },
+      annotations: READ,
     },
     async ({ handle, limit }) => {
       return withErrorHandling(async () => {

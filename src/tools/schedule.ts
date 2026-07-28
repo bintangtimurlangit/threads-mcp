@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { scheduleJob, cancelJob, listJobs, type ScheduledJob } from '../scheduler.js';
 import { withErrorHandling } from '../utils/errors.js';
+import { LOCAL_READ, LOCAL_WRITE, LOCAL_WRITE_IDEMPOTENT } from '../utils/annotations.js';
 
 type TextResult = { content: Array<{ type: 'text'; text: string }> };
 const text = (t: string): TextResult => ({ content: [{ type: 'text', text: t }] });
@@ -36,31 +37,41 @@ function renderJob(j: ScheduledJob): string {
 
 export function registerScheduleTools(server: McpServer): void {
   // ── schedule_thread ──────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'schedule_thread',
-    'Schedule a text/media post to publish later. Give `at` (ISO datetime, e.g. "2026-07-14T20:00", ' +
-      'interpreted in the server\'s local timezone unless you add an offset like "+07:00" or "Z") OR `in` ' +
-      '(a duration like "30m", "2h", "1d"). ⚠️ The post only fires while THIS server is running; past-due ' +
-      'jobs fire on the next startup. For long horizons, run the server as an always-on daemon. Local media ' +
-      'file paths must still exist when the job fires.',
     {
-      text: z
-        .string()
-        .max(500)
-        .optional()
-        .describe('Post text (max 500 chars). Optional if media is given.'),
-      media: z
-        .array(z.string())
-        .max(20)
-        .optional()
-        .describe(
-          'Local file paths and/or http(s) URLs — images and/or video. Resolved when the job fires.',
-        ),
-      at: z
-        .string()
-        .optional()
-        .describe('Absolute time, ISO 8601 (e.g. "2026-07-14T20:00" or "2026-07-14T20:00+07:00").'),
-      in: z.string().optional().describe('Relative delay from now, e.g. "45s", "30m", "2h", "3d".'),
+      title: 'Schedule a post',
+      description:
+        'Schedule a text/media post to publish later. Give `at` (ISO datetime, e.g. "2026-07-14T20:00", ' +
+        'interpreted in the server\'s local timezone unless you add an offset like "+07:00" or "Z") OR `in` ' +
+        '(a duration like "30m", "2h", "1d"). ⚠️ The post only fires while THIS server is running; past-due ' +
+        'jobs fire on the next startup. For long horizons, run the server as an always-on daemon. Local media ' +
+        'file paths must still exist when the job fires.',
+      inputSchema: {
+        text: z
+          .string()
+          .max(500)
+          .optional()
+          .describe('Post text (max 500 chars). Optional if media is given.'),
+        media: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe(
+            'Local file paths and/or http(s) URLs — images and/or video. Resolved when the job fires.',
+          ),
+        at: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute time, ISO 8601 (e.g. "2026-07-14T20:00" or "2026-07-14T20:00+07:00").',
+          ),
+        in: z
+          .string()
+          .optional()
+          .describe('Relative delay from now, e.g. "45s", "30m", "2h", "3d".'),
+      },
+      annotations: LOCAL_WRITE,
     },
     async ({ text: body, media, at, in: inn }) => {
       return withErrorHandling(async () => {
@@ -99,10 +110,14 @@ export function registerScheduleTools(server: McpServer): void {
   );
 
   // ── list_scheduled ───────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'list_scheduled',
-    'List scheduled posts and their status (pending / done / failed / canceled).',
-    {},
+    {
+      title: 'List scheduled posts',
+      description: 'List scheduled posts and their status (pending / done / failed / canceled).',
+      inputSchema: {},
+      annotations: LOCAL_READ,
+    },
     async () => {
       return withErrorHandling(async () => {
         const jobs = listJobs();
@@ -118,10 +133,15 @@ export function registerScheduleTools(server: McpServer): void {
   );
 
   // ── cancel_scheduled ─────────────────────────────────────────────────────────
-  server.tool(
+  server.registerTool(
     'cancel_scheduled',
-    'Cancel a pending scheduled post by its id (from schedule_thread / list_scheduled).',
-    { id: z.string().describe('The job id to cancel') },
+    {
+      title: 'Cancel a scheduled post',
+      description:
+        'Cancel a pending scheduled post by its id (from schedule_thread / list_scheduled).',
+      inputSchema: { id: z.string().describe('The job id to cancel') },
+      annotations: LOCAL_WRITE_IDEMPOTENT,
+    },
     async ({ id }) => {
       return withErrorHandling(async () => {
         const job = cancelJob(id);
