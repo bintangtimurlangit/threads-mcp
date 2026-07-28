@@ -71,9 +71,57 @@ export async function getPage(): Promise<Page> {
 // A single page is shared across tool calls; serialize access so overlapping
 // calls don't clobber each other's navigation.
 
+/**
+ * Ceiling on any single locked operation. Generous — a media upload over a slow
+ * link is legitimately slow — but finite, because the failure it prevents is
+ * unbounded: the lock is a single chain, so one operation that never settles
+ * blocks every future tool call for the lifetime of the process.
+ */
+const LOCK_TIMEOUT_MS = parseInt(process.env.THREADS_LOCK_TIMEOUT_MS ?? '120000', 10);
+
+/** Close the shared page so the next getPage() builds a clean one. */
+async function resetPage(): Promise<void> {
+  try {
+    const ctx = await contextPromise;
+    for (const p of ctx?.pages() ?? []) if (!p.isClosed()) await p.close();
+  } catch {
+    /* nothing usable to reset — the next getPage() will rebuild anyway */
+  }
+}
+
 let lock: Promise<unknown> = Promise.resolve();
-export function withLock<T>(fn: () => Promise<T>): Promise<T> {
-  const run = lock.then(fn, fn);
+
+/**
+ * Serialize access to the shared page.
+ *
+ * The timeout does two things when it fires: it frees the queue, and it closes
+ * the page out from under the stuck operation. That second part matters —
+ * releasing the lock alone would let the next caller drive a page that a
+ * half-finished navigation is still mutating. Closing it makes the orphan fail
+ * fast instead of racing.
+ */
+export function withLock<T>(fn: () => Promise<T>, label = 'browser operation'): Promise<T> {
+  const guarded = async (): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await new Promise<T>((resolve, reject) => {
+        timer = setTimeout(() => {
+          debug(`${label} exceeded ${LOCK_TIMEOUT_MS}ms — resetting the page`);
+          void resetPage();
+          reject(
+            new Error(
+              `${label} timed out after ${LOCK_TIMEOUT_MS}ms. The browser page was reset; ` +
+                'retry, or raise THREADS_LOCK_TIMEOUT_MS if this is a slow upload.',
+            ),
+          );
+        }, LOCK_TIMEOUT_MS);
+        fn().then(resolve, reject);
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const run = lock.then(guarded, guarded);
   lock = run.catch(() => {});
   return run;
 }
@@ -197,102 +245,105 @@ export async function captureGraphqlBatch<T = unknown>(
   const timeoutMs = opts.timeoutMs ?? 30000;
   const dwellMs = opts.dwellMs ?? 3500;
 
-  return withLock(async () => {
-    const page = await getPage();
-    const collected: Array<{ name?: string; json: unknown }> = [];
-    const pending: Array<Promise<void>> = [];
-    let embedded: unknown[] = [];
+  return withLock(
+    async () => {
+      const page = await getPage();
+      const collected: Array<{ name?: string; json: unknown }> = [];
+      const pending: Array<Promise<void>> = [];
+      let embedded: unknown[] = [];
 
-    const listener = (r: Response) => {
-      // Threads uses two GraphQL endpoints: /api/graphql (profile/post surfaces)
-      // AND /graphql/query (the home feed — BarcelonaFeedDirectQuery). Match both.
-      if (!r.url().includes('graphql')) return;
-      const name = friendlyNameOf(r.request().postData());
-      if (process.env.DEBUG === 'true' && name) debug(`saw GraphQL: ${name}`);
-      pending.push(
-        r.text().then(
-          (txt) => {
-            for (const json of parseJsonBodies(txt)) collected.push({ name, json });
-          },
-          () => {},
-        ),
-      );
-    };
+      const listener = (r: Response) => {
+        // Threads uses two GraphQL endpoints: /api/graphql (profile/post surfaces)
+        // AND /graphql/query (the home feed — BarcelonaFeedDirectQuery). Match both.
+        if (!r.url().includes('graphql')) return;
+        const name = friendlyNameOf(r.request().postData());
+        if (process.env.DEBUG === 'true' && name) debug(`saw GraphQL: ${name}`);
+        pending.push(
+          r.text().then(
+            (txt) => {
+              for (const json of parseJsonBodies(txt)) collected.push({ name, json });
+            },
+            () => {},
+          ),
+        );
+      };
 
-    /** Bodies in priority order: embedded first, then the preferred op, then the rest. */
-    const order = (): T[] => {
-      const named = opts.friendlyName
-        ? collected.filter((b) => b.name?.includes(opts.friendlyName!))
-        : [];
-      const rest = collected.filter((b) => !named.includes(b));
-      return [...embedded, ...named.map((b) => b.json), ...rest.map((b) => b.json)] as T[];
-    };
+      /** Bodies in priority order: embedded first, then the preferred op, then the rest. */
+      const order = (): T[] => {
+        const named = opts.friendlyName
+          ? collected.filter((b) => b.name?.includes(opts.friendlyName!))
+          : [];
+        const rest = collected.filter((b) => !named.includes(b));
+        return [...embedded, ...named.map((b) => b.json), ...rest.map((b) => b.json)] as T[];
+      };
 
-    // Re-running the predicate on an unchanged body set just burns CPU, so only
-    // re-check when something new has actually landed.
-    let lastChecked = -1;
-    const satisfied = (): boolean => {
-      if (!opts.enough) return false;
-      const n = embedded.length + collected.length;
-      if (n === lastChecked) return false;
-      lastChecked = n;
-      return opts.enough(order() as unknown[]);
-    };
+      // Re-running the predicate on an unchanged body set just burns CPU, so only
+      // re-check when something new has actually landed.
+      let lastChecked = -1;
+      const satisfied = (): boolean => {
+        if (!opts.enough) return false;
+        const n = embedded.length + collected.length;
+        if (n === lastChecked) return false;
+        lastChecked = n;
+        return opts.enough(order() as unknown[]);
+      };
 
-    page.on('response', listener);
-    try {
-      if (trigger) {
-        if (!page.url().startsWith(pageUrl)) {
+      page.on('response', listener);
+      try {
+        if (trigger) {
+          if (!page.url().startsWith(pageUrl)) {
+            await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+          }
+        } else {
           await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
         }
-      } else {
-        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+
+        embedded = await harvestEmbedded(page);
+
+        // The server-rendered payload often already covers the request. When it
+        // does, skip the dwell — and the trigger too, but only when the caller
+        // marked it skippable (see BatchOptions.triggerSkippable).
+        const canSkipTrigger = !trigger || opts.triggerSkippable === true;
+        if (canSkipTrigger && satisfied()) {
+          debug('satisfied by embedded payload — skipping trigger and dwell');
+        } else {
+          if (trigger) {
+            await trigger(page);
+            // The trigger may have navigated or forced more server-rendered
+            // content in; re-read and replace rather than append, so identical
+            // blocks aren't parsed and walked twice.
+            embedded = await harvestEmbedded(page);
+            lastChecked = -1;
+          }
+
+          const deadline = Date.now() + dwellMs;
+          while (Date.now() < deadline) {
+            if (satisfied()) {
+              debug('dwell satisfied early');
+              break;
+            }
+            // Without a predicate, fall back to the old signal: the preferred
+            // operation landing means the surface we wanted has responded.
+            if (
+              !opts.enough &&
+              opts.friendlyName &&
+              collected.some((b) => b.name?.includes(opts.friendlyName!))
+            ) {
+              await page.waitForTimeout(500); // let sibling queries land
+              break;
+            }
+            await page.waitForTimeout(250);
+          }
+        }
+      } finally {
+        page.off('response', listener);
       }
 
-      embedded = await harvestEmbedded(page);
-
-      // The server-rendered payload often already covers the request. When it
-      // does, skip the dwell — and the trigger too, but only when the caller
-      // marked it skippable (see BatchOptions.triggerSkippable).
-      const canSkipTrigger = !trigger || opts.triggerSkippable === true;
-      if (canSkipTrigger && satisfied()) {
-        debug('satisfied by embedded payload — skipping trigger and dwell');
-      } else {
-        if (trigger) {
-          await trigger(page);
-          // The trigger may have navigated or forced more server-rendered
-          // content in; re-read and replace rather than append, so identical
-          // blocks aren't parsed and walked twice.
-          embedded = await harvestEmbedded(page);
-          lastChecked = -1;
-        }
-
-        const deadline = Date.now() + dwellMs;
-        while (Date.now() < deadline) {
-          if (satisfied()) {
-            debug('dwell satisfied early');
-            break;
-          }
-          // Without a predicate, fall back to the old signal: the preferred
-          // operation landing means the surface we wanted has responded.
-          if (
-            !opts.enough &&
-            opts.friendlyName &&
-            collected.some((b) => b.name?.includes(opts.friendlyName!))
-          ) {
-            await page.waitForTimeout(500); // let sibling queries land
-            break;
-          }
-          await page.waitForTimeout(250);
-        }
-      }
-    } finally {
-      page.off('response', listener);
-    }
-
-    await Promise.allSettled(pending);
-    return order();
-  });
+      await Promise.allSettled(pending);
+      return order();
+    },
+    `capture ${opts.friendlyName ?? pageUrl}`,
+  );
 }
 
 /**
@@ -300,7 +351,7 @@ export async function captureGraphqlBatch<T = unknown>(
  * write tools (compose, like, follow, …) which drive Threads' real controls.
  */
 export function onPage<T>(fn: (page: Page) => Promise<T>): Promise<T> {
-  return withLock(async () => fn(await getPage()));
+  return withLock(async () => fn(await getPage()), 'page action');
 }
 
 /** Warm the session once (loads Threads so the app + tokens initialise). */
@@ -312,7 +363,7 @@ export async function warm(): Promise<void> {
       await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded', timeout: 45000 });
       await page.waitForTimeout(2500);
     }
-  });
+  }, 'warm session');
 }
 
 /** Best-effort check that the saved profile is logged in. */
@@ -363,7 +414,7 @@ export async function resolveOwnHandle(): Promise<string | undefined> {
       .catch(() => undefined);
     if (handle) cachedHandle = handle;
     return handle;
-  });
+  }, 'resolve own handle');
 }
 
 /** Cleanly close the browser (used on shutdown / after login). */
