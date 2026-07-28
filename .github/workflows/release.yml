@@ -35,6 +35,10 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run build
+      # Unit tests gate the publish too. They need no browser, display or
+      # account, so there is no reason for the release path to skip what CI
+      # already runs — and npm publishes cannot be taken back.
+      - run: npm test
 
       - name: Publish to npm (OIDC Trusted Publishing — tokenless)
         run: |
