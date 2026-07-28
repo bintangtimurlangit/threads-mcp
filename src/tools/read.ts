@@ -8,6 +8,7 @@ import { cache } from '../utils/cache.js';
 import { withErrorHandling } from '../utils/errors.js';
 import { renderPost, renderProfile, renderUserLine } from '../utils/format.js';
 import { READ } from '../utils/annotations.js';
+import { PostSchema, UserSchema, toPost, toUser } from '../api/shape.js';
 import type { TriggerContext } from '../browser/session.js';
 import type { Page } from 'playwright';
 
@@ -56,6 +57,41 @@ async function scrollFeed(page: Page, times: number, ctx?: TriggerContext): Prom
   }
 }
 
+type Structured = Record<string, unknown>;
+type Result = {
+  content: Array<{ type: 'text'; text: string }>;
+  structuredContent?: Structured;
+  isError?: boolean;
+};
+
+/**
+ * An invalid-input result. Flagged `isError` for the same reason
+ * withErrorHandling does it: a tool with an `outputSchema` must return matching
+ * `structuredContent`, and `isError` is the documented exemption for the paths
+ * that have no data to report.
+ */
+function badRequest(text: string): Result {
+  return { content: [{ type: 'text', text }], isError: true };
+}
+
+/**
+ * Text for humans, JSON for programs — the same answer in both forms.
+ *
+ * Clients that understand `structuredContent` get typed fields (a post's
+ * `code`, its `url`) instead of having to pull them back out of rendered
+ * markdown; clients that don't still get the text block, so this stays
+ * backwards-compatible.
+ */
+function result(text: string, structured: Structured): Result {
+  return { content: [{ type: 'text', text }], structuredContent: structured };
+}
+
+/** Both halves of a cached answer — caching only the text would drop the JSON. */
+interface Cached {
+  text: string;
+  structured: Structured;
+}
+
 /**
  * "Stop as soon as we have `limit` posts." Passed to the capture layer so a
  * request that the server-rendered HTML already satisfies costs one page load
@@ -80,6 +116,7 @@ export function registerReadTools(server: McpServer): void {
         'Show which Threads account this server is signed in as (your @handle, user id, name, follower/following counts). ' +
         'Use this to confirm the active session before posting.',
       inputSchema: {},
+      outputSchema: { profile: UserSchema.optional(), signed_in: z.boolean() },
       annotations: READ,
     },
     async () => {
@@ -92,6 +129,7 @@ export function registerReadTools(server: McpServer): void {
                 text: '🔒 Not signed in. Run `npm run login` (or `threads-mcp-login`) to authenticate.',
               },
             ],
+            structuredContent: { signed_in: false },
           };
         }
         const handle = await resolveOwnHandle();
@@ -106,12 +144,16 @@ export function registerReadTools(server: McpServer): void {
                   'The session is valid; try a tool, or re-run `npm run login`.',
               },
             ],
+            structuredContent: { signed_in: true },
           };
         }
         const bodies = await threadsCapture(profileUrl(handle), 'ProfileThreadsTab');
         const me = extractUser(bodies, handle);
         const header = me ? renderProfile(me) : `🧵 **@${handle}**${uid ? `\nid: \`${uid}\`` : ''}`;
-        return { content: [{ type: 'text', text: `👤 Signed in as:\n\n${header}` }] };
+        return result(`👤 Signed in as:\n\n${header}`, {
+          signed_in: true,
+          profile: me ? toUser(me) : { handle, id: uid, verified: false },
+        });
       });
     },
   );
@@ -130,37 +172,28 @@ export function registerReadTools(server: McpServer): void {
           .optional()
           .describe('The @username (with or without @). Omit for your own profile.'),
       },
+      outputSchema: { profile: UserSchema, recent_posts: z.array(PostSchema) },
       annotations: READ,
     },
     async ({ handle }) => {
       return withErrorHandling(async () => {
         const user = handle ? normalizeHandle(handle) : await resolveOwnHandle();
         if (!user) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: '❌ Could not determine your own handle. Pass `handle` explicitly, or re-run `npm run login`.',
-              },
-            ],
-          };
+          return badRequest(
+            '❌ Could not determine your own handle. Pass `handle` explicitly, or re-run `npm run login`.',
+          );
         }
 
         const cacheKey = cache.key('profile', user);
-        const cached = cache.get<string>(cacheKey);
-        if (cached) return { content: [{ type: 'text', text: cached }] };
+        const cached = cache.get<Cached>(cacheKey);
+        if (cached) return result(cached.text, cached.structured);
 
         const bodies = await threadsCapture(profileUrl(user), 'ProfileThreadsTab');
         const profile = extractUser(bodies, user);
         if (!profile) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `❌ Couldn't read @${user}'s profile. The account may be private, blocked, or nonexistent.`,
-              },
-            ],
-          };
+          return badRequest(
+            `❌ Couldn't read @${user}'s profile. The account may be private, blocked, or nonexistent.`,
+          );
         }
 
         const posts = extractPosts(bodies)
@@ -171,8 +204,9 @@ export function registerReadTools(server: McpServer): void {
           parts.push('', '— Recent —', ...posts.map((p, i) => renderPost(p, { index: i + 1 })));
         }
         const text = parts.join('\n');
-        cache.set(cacheKey, text);
-        return { content: [{ type: 'text', text }] };
+        const structured = { profile: toUser(profile), recent_posts: posts.map(toPost) };
+        cache.set(cacheKey, { text, structured });
+        return result(text, structured);
       });
     },
   );
@@ -187,14 +221,15 @@ export function registerReadTools(server: McpServer): void {
         handle: z.string().describe('The @username whose posts to fetch'),
         limit: z.number().int().min(1).max(50).default(15).describe('Max posts (1-50, default 15)'),
       },
+      outputSchema: { posts: z.array(PostSchema) },
       annotations: READ,
     },
     async ({ handle, limit }) => {
       return withErrorHandling(async () => {
         const user = normalizeHandle(handle);
         const cacheKey = cache.key('user_threads', user, limit);
-        const cached = cache.get<string>(cacheKey);
-        if (cached) return { content: [{ type: 'text', text: cached }] };
+        const cached = cache.get<Cached>(cacheKey);
+        if (cached) return result(cached.text, cached.structured);
 
         const bodies = await threadsCapture(profileUrl(user), 'ProfileThreadsTab', {
           trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
@@ -209,15 +244,16 @@ export function registerReadTools(server: McpServer): void {
           .filter((p) => p.user?.username?.toLowerCase() === user)
           .slice(0, limit);
         if (posts.length === 0) {
-          return { content: [{ type: 'text', text: `No posts found for @${user}.` }] };
+          return result(`No posts found for @${user}.`, { posts: [] });
         }
         const text = [
           `🧵 Posts by @${user}`,
           '',
           ...posts.map((p, i) => renderPost(p, { index: i + 1 })),
         ].join('\n\n');
-        cache.set(cacheKey, text);
-        return { content: [{ type: 'text', text }] };
+        const structured = { posts: posts.map(toPost) };
+        cache.set(cacheKey, { text, structured });
+        return result(text, structured);
       });
     },
   );
@@ -237,19 +273,18 @@ export function registerReadTools(server: McpServer): void {
         handle: z.string().optional().describe('Author @username (if not using url)'),
         code: z.string().optional().describe('Post shortcode (if not using url)'),
       },
+      outputSchema: { post: PostSchema.optional() },
       annotations: READ,
     },
     async ({ url, handle, code }) => {
       return withErrorHandling(async () => {
         const parsed = resolvePostTarget(url, handle, code);
         if (!parsed) {
-          return {
-            content: [{ type: 'text', text: '❌ Provide a post `url`, or `handle` + `code`.' }],
-          };
+          return badRequest('❌ Provide a post `url`, or `handle` + `code`.');
         }
         const cacheKey = cache.key('thread', parsed.pageUrl);
-        const cached = cache.get<string>(cacheKey);
-        if (cached) return { content: [{ type: 'text', text: cached }] };
+        const cached = cache.get<Cached>(cacheKey);
+        if (cached) return result(cached.text, cached.structured);
 
         const bodies = await threadsCapture(parsed.pageUrl, 'PostPage', {
           dwellMs: 3500,
@@ -261,13 +296,12 @@ export function registerReadTools(server: McpServer): void {
           posts.find((p) => !p.text_post_app_info?.is_reply) ??
           posts[0];
         if (!root) {
-          return {
-            content: [{ type: 'text', text: '❌ Could not read that post. Check the URL/code.' }],
-          };
+          return badRequest('❌ Could not read that post. Check the URL/code.');
         }
         const text = renderPost(root);
-        cache.set(cacheKey, text);
-        return { content: [{ type: 'text', text }] };
+        const structured = { post: toPost(root) };
+        cache.set(cacheKey, { text, structured });
+        return result(text, structured);
       });
     },
   );
@@ -291,15 +325,14 @@ export function registerReadTools(server: McpServer): void {
           .default(15)
           .describe('Max replies (1-50, default 15)'),
       },
+      outputSchema: { replies: z.array(PostSchema) },
       annotations: READ,
     },
     async ({ url, handle, code, limit }) => {
       return withErrorHandling(async () => {
         const parsed = resolvePostTarget(url, handle, code);
         if (!parsed) {
-          return {
-            content: [{ type: 'text', text: '❌ Provide a post `url`, or `handle` + `code`.' }],
-          };
+          return badRequest('❌ Provide a post `url`, or `handle` + `code`.');
         }
         const bodies = await threadsCapture(parsed.pageUrl, 'PostPage', {
           trigger: (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx),
@@ -324,6 +357,7 @@ export function registerReadTools(server: McpServer): void {
         if (replies.length === 0) {
           return {
             content: [{ type: 'text', text: 'No replies found (or replies are restricted).' }],
+            structuredContent: { replies: [] },
           };
         }
         const text = [
@@ -331,7 +365,7 @@ export function registerReadTools(server: McpServer): void {
           '',
           ...replies.map((p, i) => renderPost(p, { index: i + 1 })),
         ].join('\n\n');
-        return { content: [{ type: 'text', text }] };
+        return result(text, { replies: replies.map(toPost) });
       });
     },
   );
@@ -345,13 +379,14 @@ export function registerReadTools(server: McpServer): void {
       inputSchema: {
         limit: z.number().int().min(1).max(50).default(15).describe('Max posts (1-50, default 15)'),
       },
+      outputSchema: { posts: z.array(PostSchema) },
       annotations: READ,
     },
     async ({ limit }) => {
       return withErrorHandling(async () => {
         const cacheKey = cache.key('timeline', limit);
-        const cached = cache.get<string>(cacheKey);
-        if (cached) return { content: [{ type: 'text', text: cached }] };
+        const cached = cache.get<Cached>(cacheKey);
+        if (cached) return result(cached.text, cached.structured);
 
         const bodies = await threadsCapture(`${BASE_URL}/`, 'FeedDirect', {
           trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
@@ -363,6 +398,7 @@ export function registerReadTools(server: McpServer): void {
         if (posts.length === 0) {
           return {
             content: [{ type: 'text', text: 'Timeline came back empty. Try again in a moment.' }],
+            structuredContent: { posts: [] },
           };
         }
         const text = [
@@ -370,8 +406,9 @@ export function registerReadTools(server: McpServer): void {
           '',
           ...posts.map((p, i) => renderPost(p, { index: i + 1 })),
         ].join('\n\n');
-        cache.set(cacheKey, text);
-        return { content: [{ type: 'text', text }] };
+        const structured = { posts: posts.map(toPost) };
+        cache.set(cacheKey, { text, structured });
+        return result(text, structured);
       });
     },
   );
@@ -396,13 +433,19 @@ export function registerReadTools(server: McpServer): void {
           .default(15)
           .describe('Max results (1-50, default 15)'),
       },
+      // One schema covers both modes: `type` decides which key is populated,
+      // and outputSchema is static per tool.
+      outputSchema: {
+        posts: z.array(PostSchema).optional(),
+        users: z.array(UserSchema).optional(),
+      },
       annotations: READ,
     },
     async ({ query, type, limit }) => {
       return withErrorHandling(async () => {
         const cacheKey = cache.key('search', type, query.toLowerCase(), limit);
-        const cached = cache.get<string>(cacheKey);
-        if (cached) return { content: [{ type: 'text', text: cached }] };
+        const cached = cache.get<Cached>(cacheKey);
+        if (cached) return result(cached.text, cached.structured);
 
         const q = encodeURIComponent(query);
         const filter = type === 'users' ? '&serp_type=default' : '';
@@ -416,27 +459,27 @@ export function registerReadTools(server: McpServer): void {
 
         if (type === 'users') {
           const users = (await dropSelf(extractUsers(bodies, limit + 3))).slice(0, limit);
-          if (users.length === 0)
-            return { content: [{ type: 'text', text: `No users found for "${query}".` }] };
+          if (users.length === 0) return result(`No users found for "${query}".`, { users: [] });
           const text = [
             `🔎 Users matching "${query}"`,
             '',
             ...users.map((u, i) => renderUserLine(u, i + 1)),
           ].join('\n');
-          cache.set(cacheKey, text);
-          return { content: [{ type: 'text', text }] };
+          const structured = { users: users.map(toUser) };
+          cache.set(cacheKey, { text, structured });
+          return result(text, structured);
         }
 
         const posts = extractPosts(bodies).slice(0, limit);
-        if (posts.length === 0)
-          return { content: [{ type: 'text', text: `No posts found for "${query}".` }] };
+        if (posts.length === 0) return result(`No posts found for "${query}".`, { posts: [] });
         const text = [
           `🔎 Posts matching "${query}"`,
           '',
           ...posts.map((p, i) => renderPost(p, { index: i + 1 })),
         ].join('\n\n');
-        cache.set(cacheKey, text);
-        return { content: [{ type: 'text', text }] };
+        const structured = { posts: posts.map(toPost) };
+        cache.set(cacheKey, { text, structured });
+        return result(text, structured);
       });
     },
   );
@@ -459,6 +502,7 @@ export function registerReadTools(server: McpServer): void {
           .default(30)
           .describe('Max followers (1-100, default 30)'),
       },
+      outputSchema: { users: z.array(UserSchema) },
       annotations: READ,
     },
     async ({ handle, limit }) => {
@@ -505,6 +549,7 @@ export function registerReadTools(server: McpServer): void {
                 text: `Couldn't read @${user}'s followers (private account, or the list didn't load).`,
               },
             ],
+            structuredContent: { users: [] },
           };
         }
         const text = [
@@ -512,7 +557,7 @@ export function registerReadTools(server: McpServer): void {
           '',
           ...users.map((u, i) => renderUserLine(u, i + 1)),
         ].join('\n');
-        return { content: [{ type: 'text', text }] };
+        return result(text, { users: users.map(toUser) });
       });
     },
   );

@@ -4,11 +4,21 @@ import {
   ThreadsRateLimitedError,
 } from '../api/client.js';
 
-type TextResult = { content: Array<{ type: 'text'; text: string }> };
+type TextResult = {
+  content: Array<{ type: 'text'; text: string }>;
+  structuredContent?: Record<string, unknown>;
+  isError?: boolean;
+};
 
 /**
  * Wraps a tool handler to return a clean MCP error content block
  * instead of throwing and crashing the server.
+ *
+ * The result is flagged `isError`, which matters beyond correctness: tools that
+ * declare an `outputSchema` must return matching `structuredContent`, and the
+ * SDK rejects a result that has neither. `isError` is the documented exemption,
+ * so without it every failure on a structured tool would surface as an opaque
+ * "output validation error" instead of the message written below.
  */
 export async function withErrorHandling(fn: () => Promise<TextResult>): Promise<TextResult> {
   try {
@@ -36,7 +46,7 @@ export async function withErrorHandling(fn: () => Promise<TextResult>): Promise<
       message = `❌ Unknown error occurred`;
     }
 
-    return { content: [{ type: 'text', text: message }] };
+    return { content: [{ type: 'text', text: message }], isError: true };
   }
 }
 
