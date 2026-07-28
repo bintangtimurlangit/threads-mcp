@@ -218,6 +218,47 @@ loginctl enable-linger "$USER"     # keep it running after logout
 
 Or with **pm2**: `pm2 start "xvfb-run -a node build/index.js" --name threads-mcp`.
 
+### Signing in without a display
+
+`npm run login` needs a visible browser, which is the main obstacle to running
+this anywhere without a desktop — a VPS, a container, CI. The session is only
+cookies, so move it instead of trying to log in headlessly:
+
+1. On a machine with a display, sign in to Threads normally.
+2. Open devtools → Application → Cookies → `threads.com` and copy `sessionid`
+   and `ds_user_id`.
+3. On the server:
+
+```bash
+THREADS_SESSIONID=… THREADS_DS_USER_ID=… npx threads-mcp-import-session
+npm run test:live      # confirm it worked
+```
+
+> ⚠️ A `sessionid` is a bearer credential for your **entire account** — whoever
+> holds it is you. Prefer the environment-variable form so it stays out of shell
+> history, never commit it, and revoke it by logging out of Threads if it leaks.
+
+### Chromium system libraries
+
+On a fresh server Chromium needs system libraries that are not installed by
+default. If the browser fails to launch with a missing `.so`:
+
+```bash
+npx playwright install-deps chromium
+# or, Debian/Ubuntu, without Playwright's helper:
+sudo apt-get install -y libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+  libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+  libgbm1 libasound2 libpango-1.0-0 libcairo2
+```
+
+> **Why not a Docker image?** It would mainly pin those libraries — the one line
+> above. Against that, MCP over stdio means the client owns the process, so a
+> container turns `npx threads-mcp` into `docker run -i` with a volume for the
+> profile; and a containerised Chromium on a virtual display has no GPU and
+> reports renderer strings that match no real desktop, which cuts directly
+> against the fingerprint work this server depends on. Running it natively under
+> `xvfb` is both simpler and less detectable.
+
 > Note: MCP over stdio expects the client to own the process. Running a standalone daemon is specifically for the **scheduler** to survive between client sessions — the scheduled-post queue is shared via `~/.threads-mcp/scheduled.json`.
 
 ---
