@@ -19,7 +19,8 @@
 - [ ] `npm run format:check` passes
 - [ ] `npm run typecheck` passes
 - [ ] `npm run build` passes
-- [ ] `npm test` (live READ-only smoke test) passes, or I've explained why it can't run
+- [ ] `npm test` (unit tests — no browser, display or account needed) passes
+- [ ] `npm run test:live` (live READ-only smoke test) passes, or I've explained why it can't run
 - [ ] Docs updated (`README.md`, `docs/`) if behavior changed
 
 ## AI-assisted work
