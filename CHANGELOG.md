@@ -6,6 +6,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+### Added
+
+- **`get_notifications`** — reads the Activity feed (follows, replies, mentions, suggestions), optionally filtered by `kind`. Previously every read tool looked outward, so an agent could post but never notice a reply.
+- **`get_following`** — the counterpart to `get_followers`; half the social graph was unreachable.
+- **`doctor`** — health check for the session and every DOM anchor the write tools depend on, reporting what each failure breaks. Never posts, and discards any draft it would create.
+- **`create_thread` accepts `chain`** — publishes a connected multi-post thread ("Add to thread"). Posting parts separately yields unlinked threads.
+- **Structured output** — all read tools declare an `outputSchema` and return `structuredContent`, so callers get typed fields (`code`, `url`, counts) instead of parsing markdown.
+- **Tool annotations** — the read-only / idempotent / destructive matrix the README has always documented is now actually emitted; `delete_thread` is the only `destructiveHint`.
+- **`threads-mcp-import-session`** — run without a display by importing an existing session's cookies instead of opening a browser to log in.
+- **Unit tests in CI** (`npm test`) covering extractors, formatting, parsing, cache, rate limiting and media handling. The live smoke test moved to `npm run test:live`.
+- `npm run bench` — capture-latency harness against a local fixture page, no account needed.
+
+### Changed
+
+- Reads harvest Threads' server-rendered JSON **before** dwelling, and stop as soon as the request is satisfied rather than when a fixed timer expires. Scrolling waits on the pagination response instead of sleeping, and stops early when the feed is exhausted.
+- Reads are cached beyond `get_profile` (timeline, search, single post, user posts), and every write flushes the cache — previously a `get_profile` right after `create_thread` served the pre-post snapshot.
+- The write throttle measures from when the previous write **finished**, not when it started, and applies upward-only jitter.
+
+### Fixed
+
+- **`get_timeline` could return another page's posts, or nothing.** With a scroll trigger present, navigation was skipped when the current URL started with the target — and the home feed's URL is a prefix of every Threads URL, so it never navigated.
+- **Quoted posts appeared as separate feed entries**, duplicating quote-posts and consuming `limit` with phantom items.
+- **`get_thread_replies` returned the root post as its own first reply** when the URL carried no parseable shortcode.
+- **Empty captures were reported as "not signed in"**, sending users to re-authenticate a perfectly valid session.
+- The server advertised version `0.1.0` regardless of the released version.
+- One hung browser operation blocked every later tool call for the life of the process; operations are now bounded and the page is reset on timeout.
+- Media downloads had no timeout, size cap or content-type check; a multi-item `media` list that failed partway leaked the temp files already downloaded.
+- The scheduler queue grew without bound and was written non-atomically, so an interrupted save could discard every pending post.
+
 ## [0.1.2] - 2026-07-28
 
 ### Added
