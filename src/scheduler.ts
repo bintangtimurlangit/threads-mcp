@@ -36,6 +36,36 @@ const DIR = path.join(os.homedir(), '.threads-mcp');
 const FILE = path.join(DIR, 'scheduled.json');
 const POLL_MS = 20000;
 
+/**
+ * How much finished history to keep. Pending and running jobs are never pruned
+ * — dropping one would silently cancel a post the user scheduled.
+ *
+ * Without this the queue file only ever grew: every post ever scheduled stayed
+ * on disk forever, and the whole file is re-read and re-serialised on each save.
+ */
+const KEEP_FINISHED = 50;
+const KEEP_FINISHED_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+const TERMINAL: ReadonlySet<JobStatus> = new Set<JobStatus>(['done', 'failed', 'canceled']);
+
+/**
+ * Drop finished jobs that are old or beyond the retention count, keeping the
+ * most recent for `list_scheduled`'s history section.
+ */
+export function prune(all: ScheduledJob[]): ScheduledJob[] {
+  const live = all.filter((j) => !TERMINAL.has(j.status));
+  const cutoff = Date.now() - KEEP_FINISHED_MS;
+  const finished = all
+    .filter((j) => TERMINAL.has(j.status))
+    .filter((j) => {
+      const when = Date.parse(j.firedAt ?? j.at);
+      return !Number.isFinite(when) || when >= cutoff;
+    })
+    .sort((a, b) => Date.parse(a.firedAt ?? a.at) - Date.parse(b.firedAt ?? b.at))
+    .slice(-KEEP_FINISHED);
+  return [...live, ...finished];
+}
+
 let jobs: ScheduledJob[] = [];
 let timer: ReturnType<typeof setInterval> | null = null;
 let ticking = false;
@@ -43,9 +73,16 @@ let ticking = false;
 function load(): void {
   try {
     if (fs.existsSync(FILE)) {
-      jobs = JSON.parse(fs.readFileSync(FILE, 'utf8')) as ScheduledJob[];
+      const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8')) as ScheduledJob[];
+      jobs = Array.isArray(parsed) ? parsed : [];
       // Any job left 'running' means we crashed mid-publish — retry it.
       for (const j of jobs) if (j.status === 'running') j.status = 'pending';
+      const before = jobs.length;
+      jobs = prune(jobs);
+      if (jobs.length !== before) {
+        debug(`scheduler: pruned ${before - jobs.length} finished job(s)`);
+        save();
+      }
     }
   } catch (e) {
     debug(`scheduler: failed to load queue: ${e}`);
@@ -56,7 +93,12 @@ function load(): void {
 function save(): void {
   try {
     fs.mkdirSync(DIR, { recursive: true });
-    fs.writeFileSync(FILE, JSON.stringify(jobs, null, 2));
+    // Write to a sibling then rename: a crash mid-write would otherwise leave a
+    // truncated queue file, and `load` treats unparseable JSON as an empty
+    // queue — silently discarding every pending post.
+    const tmp = `${FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(jobs, null, 2));
+    fs.renameSync(tmp, FILE);
   } catch (e) {
     debug(`scheduler: failed to save queue: ${e}`);
   }
@@ -115,6 +157,7 @@ async function tick(): Promise<void> {
         job.error = e instanceof Error ? e.message : String(e);
       }
       job.firedAt = new Date().toISOString();
+      jobs = prune(jobs);
       save();
       debug(`scheduler: job ${job.id} → ${job.status}`);
     }
