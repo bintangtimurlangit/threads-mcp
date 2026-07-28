@@ -6,6 +6,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerReadTools } from './tools/read.js';
 import { registerWriteTools } from './tools/write.js';
 import { registerScheduleTools } from './tools/schedule.js';
+import { registerDoctorTool } from './tools/doctor.js';
 import { startScheduler, stopScheduler } from './scheduler.js';
 import { closeContext } from './browser/session.js';
 
@@ -40,6 +41,8 @@ async function main() {
   registerReadTools(server);
   registerWriteTools(server);
   registerScheduleTools(server);
+  // Health check for the DOM anchors the write tools depend on.
+  registerDoctorTool(server);
 
   // Start the persisted scheduled-post loop (see src/scheduler.ts).
   startScheduler();
