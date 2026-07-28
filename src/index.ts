@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import 'dotenv/config';
+import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerReadTools } from './tools/read.js';
@@ -8,10 +9,28 @@ import { registerScheduleTools } from './tools/schedule.js';
 import { startScheduler, stopScheduler } from './scheduler.js';
 import { closeContext } from './browser/session.js';
 
+/**
+ * The version we report over MCP, read from package.json at runtime.
+ *
+ * `rootDir` is ./src, so package.json can't be imported directly without
+ * changing the build layout — but it sits one level above both ./src and
+ * ./build, so the same relative URL resolves under `tsx` and from the compiled
+ * output. Falls back to '0.0.0' rather than refusing to start: an unknown
+ * version is a cosmetic problem, a server that won't boot is not.
+ */
+function serverVersion(): string {
+  try {
+    const raw = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+    return (JSON.parse(raw) as { version?: string }).version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
 async function main() {
   const server = new McpServer({
     name: 'threads-mcp',
-    version: '0.1.0',
+    version: serverVersion(),
   });
 
   // Every tool runs through the shared, logged-in CloakBrowser session
