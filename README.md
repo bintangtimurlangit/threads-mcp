@@ -28,7 +28,7 @@ You are automating a **real Threads account**. Meta rate-limits aggressively and
 
 ## Tools
 
-**23 tools.** Posts are identified by a full `url` **or** `handle` + `code` (the shortcode in `.../@user/post/CODE`).
+**24 tools.** Posts are identified by a full `url` **or** `handle` + `code` (the shortcode in `.../@user/post/CODE`).
 
 ### Read
 
@@ -71,15 +71,15 @@ You are automating a **real Threads account**. Meta rate-limits aggressively and
 
 Per the [MCP annotations spec](https://modelcontextprotocol.io/) — side effects at a glance. Write tools act on your **real** account.
 
-| Tool                                                                                                                                                             | Read-only | Idempotent | Destructive |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------: | :--------: | :---------: |
-| `whoami`, `get_profile`, `get_user_threads`, `get_thread`, `get_thread_replies`, `get_timeline`, `search`, `get_followers`, `get_following`, `get_notifications` |     ✓     |     ✓      |      –      |
-| `create_thread`, `reply_to_thread`, `quote_thread`                                                                                                               |     –     |     –      |      –      |
-| `like_thread` / `unlike_thread`, `repost_thread` / `unrepost_thread`, `follow_user` / `unfollow_user`                                                            |     –     |     ✓      |      –      |
-| `delete_thread`                                                                                                                                                  |     –     |     ✓      |      ✓      |
-| `schedule_thread`                                                                                                                                                |     –     |     –      |      –      |
-| `list_scheduled`                                                                                                                                                 |     ✓     |     ✓      |      –      |
-| `cancel_scheduled`                                                                                                                                               |     –     |     ✓      |      –      |
+| Tool                                                                                                                                                                       | Read-only | Idempotent | Destructive |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------: | :--------: | :---------: |
+| `whoami`, `get_profile`, `get_user_threads`, `get_thread`, `get_thread_replies`, `get_timeline`, `search`, `get_followers`, `get_following`, `get_notifications`, `doctor` |     ✓     |     ✓      |      –      |
+| `create_thread`, `reply_to_thread`, `quote_thread`                                                                                                                         |     –     |     –      |      –      |
+| `like_thread` / `unlike_thread`, `repost_thread` / `unrepost_thread`, `follow_user` / `unfollow_user`                                                                      |     –     |     ✓      |      –      |
+| `delete_thread`                                                                                                                                                            |     –     |     ✓      |      ✓      |
+| `schedule_thread`                                                                                                                                                          |     –     |     –      |      –      |
+| `list_scheduled`                                                                                                                                                           |     ✓     |     ✓      |      –      |
+| `cancel_scheduled`                                                                                                                                                         |     –     |     ✓      |      –      |
 
 ---
 
@@ -264,6 +264,30 @@ npm run dev          # tsx watch
 ```
 
 `DEBUG=true` logs every GraphQL operation name the app fires and each scheduler tick — useful if Meta reshuffles a surface and a reader comes back empty.
+
+---
+
+## When things break
+
+Meta ships UI changes without notice. Because writes drive the real interface,
+a moved button shows up as a vague "couldn't confirm" from whichever tool
+happened to use it — not as an obvious failure.
+
+Run `doctor` first. It checks the session and every DOM anchor the write tools
+depend on, and tells you what each failure breaks:
+
+```
+✅ session — session cookie present
+✅ composer-add-to-thread — present
+❌ post-repost — NOT FOUND
+
+**Impact:**
+- `post-repost` → repost_thread / quote_thread / unrepost_thread
+```
+
+Anchors are declared in [`src/browser/selectors.ts`](./src/browser/selectors.ts);
+update the ones that moved. `doctor { "deep": true }` also checks a real post
+page and the activity feed.
 
 ---
 
