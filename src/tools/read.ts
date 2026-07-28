@@ -124,6 +124,65 @@ function enoughUsers(limit: number): (bodies: unknown[]) => boolean {
   return (bodies) => extractUsers(bodies, limit + 8).length >= limit;
 }
 
+/**
+ * Open a profile's Followers/Following dialog and scroll it.
+ *
+ * The follower count is clickable text (no anchor); clicking it fires
+ * BarcelonaFriendshipsDialogUserQuery. The dialog opens on Followers, so
+ * reaching Following means clicking that tab.
+ *
+ * Selecting the tab is the delicate part. Every *row* in the dialog also has a
+ * "Following" button — that is the unfollow control — so a loose text match
+ * would silently unfollow whoever happens to be first in the list. The tab is
+ * therefore matched by `role="tab"`, and the text fallback requires the
+ * follower count that only the tab carries ("Following 484"), never a bare
+ * "Following".
+ */
+async function openFriendshipsDialog(
+  page: Page,
+  tab: 'followers' | 'following',
+  limit: number,
+  ctx?: TriggerContext,
+): Promise<void> {
+  await page.waitForTimeout(1500);
+  const counts = page.getByText(/^[\d.,KMrb ]+ followers$/i).first();
+  if (await counts.count()) await counts.click().catch(() => {});
+  else
+    await page
+      .getByText(/followers/i)
+      .first()
+      .click()
+      .catch(() => {});
+  await page.waitForTimeout(2000);
+
+  if (tab === 'following') {
+    const dialog = page.locator('[role="dialog"]').last();
+    let picked = false;
+    const byRole = dialog.getByRole('tab', { name: /following/i }).first();
+    if (await byRole.count().catch(() => 0)) {
+      await byRole.click({ timeout: 5000 }).catch(() => {});
+      picked = true;
+    }
+    if (!picked) {
+      // Requires the trailing count, so this can only match the tab.
+      const byText = dialog.getByText(/^Following\s*[\d.,KM]+$/i).first();
+      if (await byText.count().catch(() => 0))
+        await byText.click({ timeout: 5000 }).catch(() => {});
+    }
+    // Followers were already loaded when the dialog opened, and both lists are
+    // plain user objects with nothing distinguishing them — so drop what we
+    // have and count only what the Following tab sends.
+    ctx?.reset();
+    await page.waitForTimeout(2500);
+  }
+
+  for (let i = 0; i < Math.max(1, Math.ceil(limit / 12)); i++) {
+    if (ctx?.enough()) return;
+    await page.mouse.wheel(0, 1000);
+    await page.waitForTimeout(900);
+  }
+}
+
 export function registerReadTools(server: McpServer): void {
   // ── whoami ─────────────────────────────────────────────────────────────────────
   server.registerTool(
@@ -594,27 +653,7 @@ export function registerReadTools(server: McpServer): void {
           // predicate still cuts the in-dialog scrolling short once we have
           // enough rows.
           enough: enoughUsers(limit),
-          trigger: async (p) => {
-            // The follower count is a clickable text (no anchor) that opens a
-            // dialog; clicking it fires BarcelonaFriendshipsDialogUserQuery.
-            await p.waitForTimeout(1500);
-            const trigger = p.getByText(/^[\d.,KMrb ]+ followers$/i).first();
-            if (await trigger.count()) {
-              await trigger.click().catch(() => {});
-            } else {
-              await p
-                .getByText(/followers/i)
-                .first()
-                .click()
-                .catch(() => {});
-            }
-            await p.waitForTimeout(2000);
-            // Scroll inside the dialog to load more rows.
-            for (let i = 0; i < Math.ceil(limit / 12); i++) {
-              await p.mouse.wheel(0, 1000);
-              await p.waitForTimeout(900);
-            }
-          },
+          trigger: (p, ctx) => openFriendshipsDialog(p, 'followers', limit, ctx),
           dwellMs: 4500,
         });
         // Exclude the profile owner and the logged-in user; keep real followers.
@@ -634,6 +673,56 @@ export function registerReadTools(server: McpServer): void {
         }
         const text = [
           `👥 Followers of @${user} (partial sample, ${users.length})`,
+          '',
+          ...users.map((u, i) => renderUserLine(u, i + 1)),
+        ].join('\n');
+        return result(text, { users: users.map(toUser) });
+      });
+    },
+  );
+
+  // ── get_following ────────────────────────────────────────────────────────────
+  server.registerTool(
+    'get_following',
+    {
+      title: 'Get following',
+      description:
+        'Get a sample of the accounts a user follows (opens their Following list and reads what loads). ' +
+        'Threads does not expose a full dump; expect a partial list.',
+      inputSchema: {
+        handle: z.string().describe('The @username whose following list to read'),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .default(30)
+          .describe('Max accounts (1-100, default 30)'),
+      },
+      outputSchema: { users: z.array(UserSchema) },
+      annotations: READ,
+    },
+    async ({ handle, limit }) => {
+      return withErrorHandling(async () => {
+        const user = normalizeHandle(handle);
+        const bodies = await threadsCapture(profileUrl(user), 'FriendshipsDialogUser', {
+          // Same reasoning as get_followers: the list only exists once the
+          // dialog is open, so the trigger is never skippable.
+          enough: enoughUsers(limit),
+          trigger: (p, ctx) => openFriendshipsDialog(p, 'following', limit, ctx),
+          dwellMs: 4500,
+        });
+        const users = (await dropSelf(extractUsers(bodies, limit + 8)))
+          .filter((u) => u.username?.toLowerCase() !== user)
+          .slice(0, limit);
+        if (users.length === 0) {
+          return result(
+            `Couldn't read who @${user} follows (private account, or the list didn't load).`,
+            { users: [] },
+          );
+        }
+        const text = [
+          `👣 @${user} follows (partial sample, ${users.length})`,
           '',
           ...users.map((u, i) => renderUserLine(u, i + 1)),
         ].join('\n');

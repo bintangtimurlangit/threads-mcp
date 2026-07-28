@@ -28,7 +28,7 @@ You are automating a **real Threads account**. Meta rate-limits aggressively and
 
 ## Tools
 
-**22 tools.** Posts are identified by a full `url` **or** `handle` + `code` (the shortcode in `.../@user/post/CODE`).
+**23 tools.** Posts are identified by a full `url` **or** `handle` + `code` (the shortcode in `.../@user/post/CODE`).
 
 ### Read
 
@@ -42,6 +42,7 @@ You are automating a **real Threads account**. Meta rate-limits aggressively and
 | `get_timeline`       | Your "For you" home feed.                                                                 |
 | `search`             | Search Threads for `posts` or `users`.                                                    |
 | `get_followers`      | A partial sample of a user's followers.                                                   |
+| `get_following`      | A partial sample of who a user follows.                                                   |
 | `get_notifications`  | Your Activity feed — follows, replies, mentions, suggestions. Filterable by `kind`.       |
 
 ### Write &nbsp;(rate-limited — real account)
@@ -70,15 +71,15 @@ You are automating a **real Threads account**. Meta rate-limits aggressively and
 
 Per the [MCP annotations spec](https://modelcontextprotocol.io/) — side effects at a glance. Write tools act on your **real** account.
 
-| Tool                                                                                                                                            | Read-only | Idempotent | Destructive |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | :-------: | :--------: | :---------: |
-| `whoami`, `get_profile`, `get_user_threads`, `get_thread`, `get_thread_replies`, `get_timeline`, `search`, `get_followers`, `get_notifications` |     ✓     |     ✓      |      –      |
-| `create_thread`, `reply_to_thread`, `quote_thread`                                                                                              |     –     |     –      |      –      |
-| `like_thread` / `unlike_thread`, `repost_thread` / `unrepost_thread`, `follow_user` / `unfollow_user`                                           |     –     |     ✓      |      –      |
-| `delete_thread`                                                                                                                                 |     –     |     ✓      |      ✓      |
-| `schedule_thread`                                                                                                                               |     –     |     –      |      –      |
-| `list_scheduled`                                                                                                                                |     ✓     |     ✓      |      –      |
-| `cancel_scheduled`                                                                                                                              |     –     |     ✓      |      –      |
+| Tool                                                                                                                                                             | Read-only | Idempotent | Destructive |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------: | :--------: | :---------: |
+| `whoami`, `get_profile`, `get_user_threads`, `get_thread`, `get_thread_replies`, `get_timeline`, `search`, `get_followers`, `get_following`, `get_notifications` |     ✓     |     ✓      |      –      |
+| `create_thread`, `reply_to_thread`, `quote_thread`                                                                                                               |     –     |     –      |      –      |
+| `like_thread` / `unlike_thread`, `repost_thread` / `unrepost_thread`, `follow_user` / `unfollow_user`                                                            |     –     |     ✓      |      –      |
+| `delete_thread`                                                                                                                                                  |     –     |     ✓      |      ✓      |
+| `schedule_thread`                                                                                                                                                |     –     |     –      |      –      |
+| `list_scheduled`                                                                                                                                                 |     ✓     |     ✓      |      –      |
+| `cancel_scheduled`                                                                                                                                               |     –     |     ✓      |      –      |
 
 ---
 
