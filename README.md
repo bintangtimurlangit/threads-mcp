@@ -216,6 +216,8 @@ All optional — see `.env.example`, copy to `.env` to override.
 | `THREADS_MIN_ACTION_INTERVAL_MS` | `8000`                          | Minimum gap between write actions. Raise to be safer.                     |
 | `CACHE_TTL_MS`                   | `30000`                         | In-memory read-cache lifetime.                                            |
 | `THREADS_LOCK_TIMEOUT_MS`        | `120000`                        | Ceiling on one browser operation; on timeout the page resets.             |
+| `THREADS_MAX_MEDIA_BYTES`        | `67108864`                      | Largest accepted media file (64 MB).                                      |
+| `THREADS_MEDIA_TIMEOUT_MS`       | `60000`                         | Per-download timeout for `http(s)` media.                                 |
 | `DEBUG`                          | `false`                         | Log startup, captured GraphQL op names, and scheduler activity to stderr. |
 
 State lives under `~/.threads-mcp/`: `chrome-profile/` (your login) and `scheduled.json` (the post queue).
