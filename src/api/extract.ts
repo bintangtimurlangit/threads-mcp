@@ -13,8 +13,13 @@ function isObject(v: Json): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-/** Depth-first visit of every object/array node. */
-function walk(node: Json, visit: (o: Record<string, unknown>) => void): void {
+/**
+ * Depth-first visit of every object/array node.
+ *
+ * `visit` may return `false` to skip the current object's children, which is
+ * how `extractPosts` avoids descending into a post it has already claimed.
+ */
+function walk(node: Json, visit: (o: Record<string, unknown>) => boolean | void): void {
   const stack: Json[] = [node];
   const seen = new Set<Json>();
   while (stack.length) {
@@ -26,7 +31,7 @@ function walk(node: Json, visit: (o: Record<string, unknown>) => void): void {
       for (let i = cur.length - 1; i >= 0; i--) stack.push(cur[i]);
     } else if (isObject(cur)) {
       seen.add(cur);
-      visit(cur);
+      if (visit(cur) === false) continue;
       const keys = Object.keys(cur);
       for (let i = keys.length - 1; i >= 0; i--) stack.push(cur[keys[i]]);
     }
@@ -50,7 +55,20 @@ function postKey(p: ThreadsPost): string {
   return String(p.pk ?? p.id ?? p.code ?? Math.random());
 }
 
-/** Collect all posts across the captured bodies, in document order, de-duped. */
+/**
+ * Collect all posts across the captured bodies, in document order, de-duped.
+ *
+ * Once an object is claimed as a post we stop descending into it. A post can
+ * embed other posts — `text_post_app_info.share_info.quoted_post`, a reposted
+ * original — and those are *part of* the containing post, not separate feed
+ * entries. Walking blindly into them made a single quote-post surface twice: as
+ * itself and again as the post it quoted, which is why timelines showed items
+ * the user never scrolled past.
+ *
+ * Reply chains are unaffected: Threads nests those as `thread_items[].post`
+ * under a container node that isn't itself post-shaped, so traversal still
+ * reaches each one.
+ */
 export function extractPosts(bodies: Json[]): ThreadsPost[] {
   const out: ThreadsPost[] = [];
   const seen = new Set<string>();
@@ -58,13 +76,15 @@ export function extractPosts(bodies: Json[]): ThreadsPost[] {
     walk(body, (o) => {
       if (!looksLikePost(o)) return;
       const p = o as ThreadsPost;
-      // Drop stub/placeholder post objects with no author and no text — they
-      // render as an empty "(unknown)" block otherwise.
+      // Stub/placeholder with no author and no text: not a post worth
+      // reporting, but it may *wrap* one, so keep descending.
       if (!p.user?.username && !p.caption?.text) return;
       const k = postKey(p);
-      if (seen.has(k)) return;
-      seen.add(k);
-      out.push(p);
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(p);
+      }
+      return false; // claimed — its nested posts belong to it
     });
   }
   return out;
