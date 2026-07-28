@@ -25,7 +25,9 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm run build
+      - run: npm test
 
-# Note: `npm test` is a LIVE, READ-only smoke test that needs a logged-in
+# Note: `npm test` (unit tests) runs above — it needs no browser or login.
+# `npm run test:live` is a LIVE, READ-only smoke test that needs a logged-in
 # browser session and a display, so it is not run in CI — run it locally after
 # `npm run login`.

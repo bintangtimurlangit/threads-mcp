@@ -31,7 +31,8 @@ More detail: [docs/DEVELOPMENT.md](./docs/DEVELOPMENT.md).
    npm run format:check
    npm run typecheck
    npm run build
-   npm test          # live READ-only smoke test (needs a login + a display)
+   npm test          # unit tests (no browser, no login)
+   npm run test:live # live READ-only smoke test (needs a login + a display)
    ```
 
 4. **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat(tools): ...`, `fix(browser): ...`, `docs: ...`). A `commit-msg` hook enforces this.

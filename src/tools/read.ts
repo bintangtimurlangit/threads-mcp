@@ -12,7 +12,7 @@ import type { TriggerContext } from '../browser/session.js';
 import type { Page } from 'playwright';
 
 /** Parse a Threads post URL → { handle, code }. Accepts a bare code too. */
-function parsePost(input: string): { handle?: string; code: string } | null {
+export function parsePost(input: string): { handle?: string; code: string } | null {
   const m = input.match(/@([A-Za-z0-9._]+)\/post\/([A-Za-z0-9_-]+)/);
   if (m) return { handle: m[1], code: m[2] };
   // Handle-less permalink, e.g. https://www.threads.com/post/ABC123 — Threads

@@ -4,7 +4,7 @@
  * a display (use `xvfb-run` on servers). Exercises the READ path only — it does
  * NOT post, like, or follow, so it's safe to run.
  *
- *   npm test
+ *   npm run test:live
  */
 import 'dotenv/config';
 import { isLoggedIn, resolveOwnHandle, closeContext } from '../src/browser/session.js';
