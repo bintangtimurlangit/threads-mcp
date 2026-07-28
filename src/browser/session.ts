@@ -134,6 +134,17 @@ export interface TriggerContext {
    * of running a fixed iteration count.
    */
   enough: () => boolean;
+  /**
+   * Discard everything captured so far — "the surface I want starts now".
+   *
+   * For a trigger that switches between surfaces sharing one response shape.
+   * The Followers/Following dialog is the case in point: it opens on Followers
+   * and loads them immediately, so after clicking through to Following the
+   * capture holds both lists, both of them plain user objects with nothing to
+   * tell them apart. Whichever landed first wins on document order, and
+   * get_following would return followers.
+   */
+  reset: () => void;
 }
 
 export interface BatchOptions {
@@ -333,7 +344,16 @@ export async function captureGraphqlBatch<T = unknown>(
           debug('satisfied by embedded payload — skipping trigger and dwell');
         } else {
           if (trigger) {
-            await trigger(page, { enough: isEnough });
+            await trigger(page, {
+              enough: isEnough,
+              reset: () => {
+                collected.length = 0;
+                embedded.length = 0;
+                seenBlocks.clear();
+                lastChecked = -1;
+                debug('trigger reset the capture buffer');
+              },
+            });
             // The trigger may have navigated or pulled in more server-rendered
             // content; add whatever is new, deduped by raw text.
             embedded.push(...(await harvestEmbedded(page, seenBlocks)));
