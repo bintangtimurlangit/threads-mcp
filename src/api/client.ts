@@ -54,13 +54,27 @@ export class ThreadsRateLimitedError extends ThreadsAPIError {
 export async function threadsCapture(
   pageUrl: string,
   friendlyName: string,
-  opts: { trigger?: (page: Page) => Promise<void>; dwellMs?: number; timeoutMs?: number } = {},
+  opts: {
+    trigger?: (page: Page) => Promise<void>;
+    dwellMs?: number;
+    timeoutMs?: number;
+    /** Stop as soon as this says we have enough — see BatchOptions.enough. */
+    enough?: (bodies: unknown[]) => boolean;
+    /** Whether `trigger` may be skipped when `enough` is already satisfied. */
+    triggerSkippable?: boolean;
+  } = {},
 ): Promise<unknown[]> {
   let bodies: unknown[];
   try {
     bodies = await captureGraphqlBatch(
       pageUrl,
-      { friendlyName, dwellMs: opts.dwellMs, timeoutMs: opts.timeoutMs },
+      {
+        friendlyName,
+        dwellMs: opts.dwellMs,
+        timeoutMs: opts.timeoutMs,
+        enough: opts.enough,
+        triggerSkippable: opts.triggerSkippable,
+      },
       opts.trigger,
     );
   } catch (e) {
