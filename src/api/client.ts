@@ -1,4 +1,4 @@
-import { captureGraphqlBatch, BASE_URL } from '../browser/session.js';
+import { captureGraphqlBatch, BASE_URL, isLoggedIn } from '../browser/session.js';
 import type { Page } from 'playwright';
 
 // ─── Error types ──────────────────────────────────────────────────────────────
@@ -45,8 +45,11 @@ export class ThreadsRateLimitedError extends ThreadsAPIError {
 /**
  * Navigate to `pageUrl` (optionally then run `trigger`) and collect every
  * GraphQL response the app emits. `friendlyName` is a *preference*, not a
- * requirement — extractors walk all bodies. Throws auth-required when nothing
- * came back (usually a dead session or a blocked page).
+ * requirement — extractors walk all bodies.
+ *
+ * An empty capture has several causes (dead session, slow page, private or
+ * missing profile, a Meta interstitial), so we check the session cookie before
+ * blaming auth — see the comment at the throw site.
  */
 export async function threadsCapture(
   pageUrl: string,
@@ -69,7 +72,20 @@ export async function threadsCapture(
       friendlyName,
     );
   }
-  if (bodies.length === 0) throw new ThreadsAuthRequiredError(friendlyName);
+  if (bodies.length === 0) {
+    // An empty capture used to unconditionally raise "not signed in", which
+    // sent people off to re-run `npm run login` for what was usually a slow
+    // page or a profile that genuinely has nothing to show. Only blame auth
+    // when the session cookie is actually gone; otherwise say what we know.
+    if (!(await isLoggedIn())) throw new ThreadsAuthRequiredError(friendlyName);
+    throw new ThreadsAPIError(
+      `Loaded ${friendlyName} but Threads returned no data. The page may still have been ` +
+        'loading, the account may be private or nonexistent, or Meta may have shown an ' +
+        'interstitial. Your session is still valid — retry, and raise `dwellMs` if it persists.',
+      204,
+      friendlyName,
+    );
+  }
   return bodies;
 }
 
