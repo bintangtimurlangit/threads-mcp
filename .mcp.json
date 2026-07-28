@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "threads": {
+      "command": "node",
+      "args": ["build/index.js"]
+    },
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": ["graphify-out/graph.json", "--transport", "stdio"]
+    }
+  }
+}
