@@ -215,6 +215,7 @@ All optional — see `.env.example`, copy to `.env` to override.
 | `THREADS_HEADLESS`               | `false`                         | Keep `false` — headless is detected.                                      |
 | `THREADS_MIN_ACTION_INTERVAL_MS` | `8000`                          | Minimum gap between write actions. Raise to be safer.                     |
 | `CACHE_TTL_MS`                   | `30000`                         | In-memory read-cache lifetime.                                            |
+| `THREADS_LOCK_TIMEOUT_MS`        | `120000`                        | Ceiling on one browser operation; on timeout the page resets.             |
 | `DEBUG`                          | `false`                         | Log startup, captured GraphQL op names, and scheduler activity to stderr. |
 
 State lives under `~/.threads-mcp/`: `chrome-profile/` (your login) and `scheduled.json` (the post queue).
