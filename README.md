@@ -9,7 +9,7 @@ An MCP server for **Meta's Threads** that acts as _your own account_ — read pr
 
 > **No developer account.** Unlike the official [Threads Graph API](https://developers.facebook.com/docs/threads) approach (which needs an app, OAuth, and an Instagram Business account), this server drives a **real logged-in browser session** using your own cookies.
 
-**Contents:** [Rate limits](#️-behave-for-rate-limits) · [Tools](#tools) · [Media](#media) · [Scheduling](#scheduling) · [Setup](#setup) · [Run as a daemon](#running-as-a-persistent-daemon) · [Config](#configuration) · [How it works](#how-it-works) · [Troubleshooting](#troubleshooting)
+**Contents:** [Rate limits](#️-behave-for-rate-limits) · [Tools](#tools) · [Structured output](#structured-output) · [Media](#media) · [Scheduling](#scheduling) · [Setup](#setup) · [Run as a daemon](#running-as-a-persistent-daemon) · [Config](#configuration) · [How it works](#how-it-works) · [When things break](#when-things-break) · [Troubleshooting](#troubleshooting)
 
 **Full reference:** [Documentation](./docs/README.md) · **Changelog:** [CHANGELOG.md](./CHANGELOG.md) · **Versioning & releases:** [docs/RELEASES.md](./docs/RELEASES.md)
 
@@ -80,6 +80,47 @@ Per the [MCP annotations spec](https://modelcontextprotocol.io/) — side effect
 | `schedule_thread`                                                                                                                                                          |     –     |     –      |      –      |
 | `list_scheduled`                                                                                                                                                           |     ✓     |     ✓      |      –      |
 | `cancel_scheduled`                                                                                                                                                         |     –     |     ✓      |      –      |
+
+### Structured output
+
+Every read tool returns **both** a rendered text block and machine-readable
+`structuredContent`, described by an `outputSchema` the client can inspect. Text
+clients are unaffected; anything that understands structured output gets typed
+fields instead of parsing prose.
+
+This matters for chaining. Recovering a shortcode from rendered markdown works
+right up until a post's own text contains something shortcode-shaped:
+
+```jsonc
+// search → structuredContent
+{
+  "posts": [
+    {
+      "code": "DbUd7C8iR7A", // pass straight to like_thread / get_thread
+      "url": "https://www.threads.com/@someone/post/DbUd7C8iR7A",
+      "author": "someone",
+      "text": "…",
+      "created_at": "2026-07-28T05:12:44.000Z", // ISO, not a relative "3h"
+      "likes": 15,
+      "replies": 2,
+      "reposts": 0,
+      "quotes": 0,
+      "media": "image", // none | image | video
+      "is_reply": false,
+      "quoted": { "author": "other", "text": "…" }, // when it quotes a post
+    },
+  ],
+}
+```
+
+`get_profile` and `get_followers` / `get_following` return `profile` / `users`
+in the same spirit; `get_notifications` returns `notifications` with a
+normalised `kind` plus Threads' own `label`.
+
+The shapes are a small surface this project owns — deliberately **not** Meta's
+raw payloads, which reshuffle between app builds. Failures set `isError` and
+carry no structured content, so a failed call is never mistaken for an empty
+result.
 
 ---
 

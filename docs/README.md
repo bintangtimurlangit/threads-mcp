@@ -5,7 +5,7 @@
 | Document                            | Description                                                                                                    |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | [Configuration](./CONFIGURATION.md) | Env vars, `mcpServers` JSON, `xvfb` for headless machines, per-client setup                                    |
-| [Development](./DEVELOPMENT.md)     | Scripts, build, login, the live smoke test, how the browser automation works                                   |
+| [Development](./DEVELOPMENT.md)     | Scripts, project layout, tests, how the browser automation works                                               |
 | [Releases](./RELEASES.md)           | SemVer, npm tags, git tags, publishing, [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) |
 | [Changelog](../CHANGELOG.md)        | Version history ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/))                                     |
 
