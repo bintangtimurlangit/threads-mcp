@@ -192,6 +192,10 @@ export function registerReadTools(server: McpServer): void {
     async ({ handle, limit }) => {
       return withErrorHandling(async () => {
         const user = normalizeHandle(handle);
+        const cacheKey = cache.key('user_threads', user, limit);
+        const cached = cache.get<string>(cacheKey);
+        if (cached) return { content: [{ type: 'text', text: cached }] };
+
         const bodies = await threadsCapture(profileUrl(user), 'ProfileThreadsTab', {
           trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
           triggerSkippable: true, // scrolling just fetches more of the same posts
@@ -212,6 +216,7 @@ export function registerReadTools(server: McpServer): void {
           '',
           ...posts.map((p, i) => renderPost(p, { index: i + 1 })),
         ].join('\n\n');
+        cache.set(cacheKey, text);
         return { content: [{ type: 'text', text }] };
       });
     },
@@ -242,7 +247,14 @@ export function registerReadTools(server: McpServer): void {
             content: [{ type: 'text', text: '❌ Provide a post `url`, or `handle` + `code`.' }],
           };
         }
-        const bodies = await threadsCapture(parsed.pageUrl, 'PostPage', { dwellMs: 3500 });
+        const cacheKey = cache.key('thread', parsed.pageUrl);
+        const cached = cache.get<string>(cacheKey);
+        if (cached) return { content: [{ type: 'text', text: cached }] };
+
+        const bodies = await threadsCapture(parsed.pageUrl, 'PostPage', {
+          dwellMs: 3500,
+          enough: enoughPosts(1),
+        });
         const posts = extractPosts(bodies);
         const root =
           posts.find((p) => p.code === parsed.code) ??
@@ -253,7 +265,9 @@ export function registerReadTools(server: McpServer): void {
             content: [{ type: 'text', text: '❌ Could not read that post. Check the URL/code.' }],
           };
         }
-        return { content: [{ type: 'text', text: renderPost(root) }] };
+        const text = renderPost(root);
+        cache.set(cacheKey, text);
+        return { content: [{ type: 'text', text }] };
       });
     },
   );
@@ -335,6 +349,10 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ limit }) => {
       return withErrorHandling(async () => {
+        const cacheKey = cache.key('timeline', limit);
+        const cached = cache.get<string>(cacheKey);
+        if (cached) return { content: [{ type: 'text', text: cached }] };
+
         const bodies = await threadsCapture(`${BASE_URL}/`, 'FeedDirect', {
           trigger: limit > 8 ? (p, ctx) => scrollFeed(p, Math.ceil(limit / 8), ctx) : undefined,
           triggerSkippable: true, // scrolling just fetches more of the same posts
@@ -352,6 +370,7 @@ export function registerReadTools(server: McpServer): void {
           '',
           ...posts.map((p, i) => renderPost(p, { index: i + 1 })),
         ].join('\n\n');
+        cache.set(cacheKey, text);
         return { content: [{ type: 'text', text }] };
       });
     },
@@ -381,6 +400,10 @@ export function registerReadTools(server: McpServer): void {
     },
     async ({ query, type, limit }) => {
       return withErrorHandling(async () => {
+        const cacheKey = cache.key('search', type, query.toLowerCase(), limit);
+        const cached = cache.get<string>(cacheKey);
+        if (cached) return { content: [{ type: 'text', text: cached }] };
+
         const q = encodeURIComponent(query);
         const filter = type === 'users' ? '&serp_type=default' : '';
         const searchUrl = threadsUrl(`/search?q=${q}${filter}`);
@@ -400,6 +423,7 @@ export function registerReadTools(server: McpServer): void {
             '',
             ...users.map((u, i) => renderUserLine(u, i + 1)),
           ].join('\n');
+          cache.set(cacheKey, text);
           return { content: [{ type: 'text', text }] };
         }
 
@@ -411,6 +435,7 @@ export function registerReadTools(server: McpServer): void {
           '',
           ...posts.map((p, i) => renderPost(p, { index: i + 1 })),
         ].join('\n\n');
+        cache.set(cacheKey, text);
         return { content: [{ type: 'text', text }] };
       });
     },
