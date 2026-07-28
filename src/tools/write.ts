@@ -275,7 +275,11 @@ function postPageUrl(url?: string, handle?: string, code?: string): string | nul
  * Type `text` into the open composer dialog and submit it. Assumes a composer
  * dialog is already open on `page`. Returns when the Post button was clicked.
  */
-async function fillAndSubmitComposer(page: Page, text: string): Promise<void> {
+async function fillAndSubmitComposer(
+  page: Page,
+  text: string,
+  chain: string[] = [],
+): Promise<void> {
   // The composer is a dialog with a contenteditable body and a "Post" button.
   const dialog = page.locator('div[role="dialog"]').last();
   const editor = dialog.locator('[contenteditable="true"]').first();
@@ -285,7 +289,31 @@ async function fillAndSubmitComposer(page: Page, text: string): Promise<void> {
   await page.keyboard.type(text, { delay: 15 });
   await page.waitForTimeout(700);
 
-  // The submit control is a "Post" button; it enables once there's text.
+  // Each extra part is another post in the same chain. "Add to thread" appends
+  // a fresh editor; the new one is always last in the dialog. The whole chain
+  // is submitted by a single "Post" at the end — posting between parts would
+  // publish them as unrelated standalone threads.
+  for (const part of chain) {
+    const add = dialog.getByRole('button', { name: /^add to thread$/i }).first();
+    if (!(await add.count())) {
+      throw new ThreadsAPIError(
+        'Could not find the "Add to thread" control, so the chain would have posted ' +
+          'as separate threads. Nothing was published.',
+        200,
+        'chain',
+      );
+    }
+    await safeClick(add, 8000);
+    await page.waitForTimeout(1000);
+    const next = dialog.locator('[contenteditable="true"]').last();
+    await next.waitFor({ state: 'visible', timeout: 8000 });
+    await next.click();
+    await page.keyboard.type(part, { delay: 15 });
+    await page.waitForTimeout(600);
+  }
+
+  // The submit control is a "Post" button; it enables once there's text. The
+  // anchored regex keeps this off "Post Options", which sits beside it.
   const postBtn = dialog.getByRole('button', { name: /^post$/i }).first();
   await safeClick(postBtn, 8000);
 }
@@ -437,10 +465,19 @@ async function waitComposerClosed(page: Page): Promise<boolean> {
  * `create_thread` tool and the scheduler. Returns a human-readable result and
  * throws on hard failures (login/media). Does its own rate-limit throttling.
  */
-export async function publishThread(opts: { text?: string; media?: string[] }): Promise<string> {
+export async function publishThread(opts: {
+  text?: string;
+  media?: string[];
+  chain?: string[];
+}): Promise<string> {
   const { text, media } = opts;
+  const chain = (opts.chain ?? []).filter((c) => c.trim().length > 0);
   if (!text && !(media && media.length)) {
     throw new ThreadsAPIError('Provide text, media, or both.', 200, 'publish');
+  }
+  if (chain.length && !text) {
+    // The chain hangs off the first post, so there has to be one.
+    throw new ThreadsAPIError('`chain` needs `text` for the first post.', 200, 'publish');
   }
   await requireLogin();
   const { paths, temps } =
@@ -472,12 +509,12 @@ export async function publishThread(opts: { text?: string; media?: string[] }): 
       await page.waitForTimeout(1000);
 
       if (paths.length) await uploadMedia(page, paths);
-      await fillAndSubmitComposer(page, text ?? '');
+      await fillAndSubmitComposer(page, text ?? '', chain);
       const closed = await waitComposerClosed(page);
 
-      const what = paths.length
-        ? `${text ? `"${text}" + ` : ''}${paths.length} media`
-        : `"${text}"`;
+      const what =
+        (paths.length ? `${text ? `"${text}" + ` : ''}${paths.length} media` : `"${text}"`) +
+        (chain.length ? ` (+${chain.length} more in the chain)` : '');
       // The scheduler calls publishThread directly, bypassing ok(), so close
       // out the write here too.
       markWriteComplete();
@@ -514,11 +551,20 @@ export function registerWriteTools(server: McpServer): void {
             'Local file paths and/or http(s) URLs to attach. Images (jpg/png/webp/avif) and/or video ' +
               '(mp4/mov/webm). Multiple images post as a carousel. Optional if text is given.',
           ),
+        chain: z
+          .array(z.string().max(500))
+          .max(24)
+          .optional()
+          .describe(
+            'Additional posts to publish as one connected thread, in order, after `text`. ' +
+              'This is the multi-post format Threads calls "Add to thread" — the parts stay ' +
+              'linked. Posting them one at a time instead produces unlinked standalone threads.',
+          ),
       },
       annotations: WRITE_CREATES,
     },
-    async ({ text, media }) => {
-      return withErrorHandling(async () => ok(await publishThread({ text, media })));
+    async ({ text, media, chain }) => {
+      return withErrorHandling(async () => ok(await publishThread({ text, media, chain })));
     },
   );
 
