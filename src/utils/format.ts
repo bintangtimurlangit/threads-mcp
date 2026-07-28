@@ -64,6 +64,14 @@ export function renderPost(p: ThreadsPost, opts: { index?: number } = {}): strin
   }
   if ((p.video_versions?.length ?? 0) > 0) lines.push('🎬 [video]');
   else if ((p.image_versions2?.candidates?.length ?? 0) > 0) lines.push('🖼 [image]');
+  // An embedded quote/repost is part of this post, not a separate feed entry,
+  // so show it inline as a single attributed line.
+  const embedded = info?.share_info?.quoted_post ?? info?.share_info?.reposted_post;
+  if (embedded) {
+    const who = embedded.user?.username ? `@${embedded.user.username}` : 'unknown';
+    const quoted = truncate(postText(embedded), 140);
+    lines.push(`❝ ${who}${quoted ? `: ${quoted}` : ''}`);
+  }
   lines.push(stats);
   const link = postLink(p);
   if (link) lines.push(`↳ ${link}${p.pk ? `  ·  id: \`${p.pk}\`` : ''}`);

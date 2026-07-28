@@ -26,6 +26,15 @@ export interface TextPostAppInfo {
   is_reply?: boolean;
   reply_to_author?: { username?: string };
   link_preview_attachment?: { url?: string; title?: string } | null;
+  /**
+   * A post embedded in this one. `extractPosts` deliberately does not surface
+   * these as separate feed entries (they belong to the containing post), so
+   * rendering reads them from here instead.
+   */
+  share_info?: {
+    quoted_post?: ThreadsPost | null;
+    reposted_post?: ThreadsPost | null;
+  } | null;
 }
 
 export interface ThreadsPost {
