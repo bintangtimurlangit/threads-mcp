@@ -1,7 +1,7 @@
 {
   "name": "@bintangtimurlangit/threads-mcp",
   "version": "0.1.2",
-  "description": "An MCP server for Meta's Threads via a logged-in browser session — read profiles, posts, replies, timeline & search, and post/reply/like/repost/follow. No developer account: it uses your own cookie session.",
+  "description": "An MCP server for Meta's Threads via a logged-in browser session \u2014 read profiles, posts, replies, timeline & search, and post/reply/like/repost/follow. No developer account: it uses your own cookie session.",
   "author": "bintangtimurlangit",
   "license": "MIT",
   "type": "module",
@@ -18,13 +18,15 @@
   "homepage": "https://github.com/bintangtimurlangit/threads-mcp#readme",
   "bin": {
     "threads-mcp": "build/index.js",
-    "threads-mcp-login": "build/login.js"
+    "threads-mcp-login": "build/login.js",
+    "threads-mcp-import-session": "build/import-session.js"
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
     "prebuild": "npm run clean",
     "build": "tsc",
     "login": "tsx src/login.ts",
+    "import-session": "tsx src/import-session.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node build/index.js",
     "typecheck": "tsc --noEmit",
