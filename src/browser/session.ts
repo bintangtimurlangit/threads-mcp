@@ -213,7 +213,7 @@ function parseJsonBodies(txt: string): unknown[] {
  * primary data source. The live GraphQL responses only cover lazy/secondary
  * queries (side-nav, scroll pagination).
  */
-async function harvestEmbedded(page: Page): Promise<unknown[]> {
+async function harvestEmbedded(page: Page, seen: Set<string>): Promise<unknown[]> {
   const out: unknown[] = [];
   try {
     const raws = await page.$$eval('script[type="application/json"]', (nodes) =>
@@ -221,13 +221,17 @@ async function harvestEmbedded(page: Page): Promise<unknown[]> {
     );
     for (const raw of raws) {
       if (raw.length < 40) continue;
+      // Blocks are re-read after the trigger, so skip ones already parsed
+      // rather than walking identical payloads twice.
+      if (seen.has(raw)) continue;
+      seen.add(raw);
       try {
         out.push(JSON.parse(raw));
       } catch {
         /* not standalone JSON — skip */
       }
     }
-    debug(`harvested ${out.length} embedded JSON blocks`);
+    debug(`harvested ${out.length} new embedded JSON blocks (${seen.size} seen)`);
   } catch {
     /* page may have navigated away — ignore */
   }
@@ -260,7 +264,12 @@ export async function captureGraphqlBatch<T = unknown>(
       const page = await getPage();
       const collected: Array<{ name?: string; json: unknown }> = [];
       const pending: Array<Promise<void>> = [];
-      let embedded: unknown[] = [];
+      // Accumulated across harvests. The blocks are read again after the trigger,
+      // and React strips them from the DOM during hydration — so the later read
+      // can legitimately return nothing. Replacing rather than accumulating threw
+      // away the payload the whole optimisation depends on.
+      const embedded: unknown[] = [];
+      const seenBlocks = new Set<string>();
 
       const listener = (r: Response) => {
         // Threads uses two GraphQL endpoints: /api/graphql (profile/post surfaces)
@@ -303,15 +312,18 @@ export async function captureGraphqlBatch<T = unknown>(
 
       page.on('response', listener);
       try {
-        if (trigger) {
-          if (!page.url().startsWith(pageUrl)) {
-            await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-          }
-        } else {
-          await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
-        }
+        // Always navigate. This used to be conditional when a trigger was
+        // supplied — skipped when `page.url().startsWith(pageUrl)` — which is
+        // wrong for any pageUrl that is a prefix of other pages. The home feed
+        // is `https://www.threads.com/`, a prefix of *every* Threads URL, so
+        // get_timeline never navigated: it scrolled whatever page the previous
+        // tool call happened to leave behind and returned nothing.
+        //
+        // Reusing the loaded page saved one navigation at the cost of serving
+        // another page's data. Not a trade worth making.
+        await page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
 
-        embedded = await harvestEmbedded(page);
+        embedded.push(...(await harvestEmbedded(page, seenBlocks)));
 
         // The server-rendered payload often already covers the request. When it
         // does, skip the dwell — and the trigger too, but only when the caller
@@ -322,10 +334,9 @@ export async function captureGraphqlBatch<T = unknown>(
         } else {
           if (trigger) {
             await trigger(page, { enough: isEnough });
-            // The trigger may have navigated or forced more server-rendered
-            // content in; re-read and replace rather than append, so identical
-            // blocks aren't parsed and walked twice.
-            embedded = await harvestEmbedded(page);
+            // The trigger may have navigated or pulled in more server-rendered
+            // content; add whatever is new, deduped by raw text.
+            embedded.push(...(await harvestEmbedded(page, seenBlocks)));
             lastChecked = -1;
           }
 
