@@ -19,7 +19,8 @@
   "bin": {
     "threads-mcp": "build/index.js",
     "threads-mcp-login": "build/login.js",
-    "threads-mcp-import-session": "build/import-session.js"
+    "threads-mcp-import-session": "build/import-session.js",
+    "threads-mcp-install-skill": "scripts/install-skill.mjs"
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('build',{recursive:true,force:true})\"",
@@ -27,6 +28,7 @@
     "build": "tsc",
     "login": "tsx src/login.ts",
     "import-session": "tsx src/import-session.ts",
+    "install-skill": "node scripts/install-skill.mjs",
     "dev": "tsx watch src/index.ts",
     "start": "node build/index.js",
     "typecheck": "tsc --noEmit",
@@ -50,6 +52,8 @@
     "build",
     ".env.example",
     "docs",
+    "skills",
+    "scripts",
     "CHANGELOG.md",
     "LICENSE",
     "CONTRIBUTING.md",

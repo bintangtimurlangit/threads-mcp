@@ -4,27 +4,29 @@ Requires Node.js 20 or newer. CI covers Node.js 20, 22, and 24.
 
 ## Scripts
 
-| Command                  | Description                                                      |
-| ------------------------ | ---------------------------------------------------------------- |
-| `npm install`            | Install dependencies (also fetches the CloakBrowser binary)      |
-| `npm run login`          | One-time: open a browser window and log into Threads             |
-| `npm run import-session` | Import an existing session's cookies — no display needed         |
-| `npm run build`          | Compile TypeScript to `build/` (`tsc`)                           |
-| `npm run dev`            | Watch mode: `tsx watch src/index.ts`                             |
-| `npm run start`          | Run compiled server: `node build/index.js`                       |
-| `npm run lint`           | ESLint over the repo                                             |
-| `npm run format`         | Prettier write; `npm run format:check` to verify                 |
-| `npm run typecheck`      | `tsc --noEmit`, strict, with unused-symbol checks                |
-| `npm test`               | Unit tests (extractors, formatting, parsing, cache) — no browser |
-| `npm run test:live`      | **Live READ-only smoke test** — needs a login and a display      |
-| `npm run bench`          | Capture-latency harness against a local fixture page             |
-| `npm run graph`          | Build the Graphify knowledge graph (`graphify-out/`, local only) |
+| Command                  | Description                                                                  |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `npm install`            | Install dependencies (also fetches the CloakBrowser binary)                  |
+| `npm run login`          | One-time: open a browser window and log into Threads                         |
+| `npm run import-session` | Import an existing session's cookies — no display needed                     |
+| `npm run build`          | Compile TypeScript to `build/` (`tsc`)                                       |
+| `npm run dev`            | Watch mode: `tsx watch src/index.ts`                                         |
+| `npm run start`          | Run compiled server: `node build/index.js`                                   |
+| `npm run lint`           | ESLint over the repo                                                         |
+| `npm run format`         | Prettier write; `npm run format:check` to verify                             |
+| `npm run typecheck`      | `tsc --noEmit`, strict, with unused-symbol checks                            |
+| `npm test`               | Unit tests (extractors, formatting, parsing, cache) — no browser             |
+| `npm run test:live`      | **Live READ-only smoke test** — needs a login and a display                  |
+| `npm run bench`          | Capture-latency harness against a local fixture page                         |
+| `npm run install-skill`  | Copy the bundled Agent Skill into ~/.claude/skills (`-- --project` for repo) |
+| `npm run graph`          | Build the Graphify knowledge graph (`graphify-out/`, local only)             |
 
 ## Project layout
 
 ```
 src/
-  index.ts            # MCP server entry; registers all tool groups
+  index.ts            # MCP server entry; registers all tool groups + prompts
+  prompts.ts          # MCP prompts — workflows, and the safety rules they carry
   login.ts            # one-time interactive login (npm run login)
   import-session.ts   # import cookies instead of logging in (headless machines)
   scheduler.ts        # persisted queue + poll loop for scheduled posts
@@ -47,6 +49,10 @@ src/
     errors.ts         # error wrapper / friendly messages
     format.ts         # rendering helpers for the text half of each result
     ratelimit.ts      # write-action spacing
+skills/
+  threads-mcp/        # Agent Skill shipped in the package (Claude-side, not MCP)
+scripts/
+  install-skill.mjs   # copies the skill into a Claude skills directory
 test/
   smoke.ts            # the `npm run test:live` READ-only health check
   capture-bench.ts    # latency harness for the capture path

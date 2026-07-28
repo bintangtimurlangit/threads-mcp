@@ -7,6 +7,7 @@ import { registerReadTools } from './tools/read.js';
 import { registerWriteTools } from './tools/write.js';
 import { registerScheduleTools } from './tools/schedule.js';
 import { registerDoctorTool } from './tools/doctor.js';
+import { registerPrompts } from './prompts.js';
 import { startScheduler, stopScheduler } from './scheduler.js';
 import { closeContext } from './browser/session.js';
 
@@ -43,6 +44,9 @@ async function main() {
   registerScheduleTools(server);
   // Health check for the DOM anchors the write tools depend on.
   registerDoctorTool(server);
+  // Workflows, not capabilities — see src/prompts.ts. Registering at least one
+  // prompt is what makes the server advertise the `prompts` capability.
+  registerPrompts(server);
 
   // Start the persisted scheduled-post loop (see src/scheduler.ts).
   startScheduler();

@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Ver
 
 ## [Unreleased]
 
+### Added
+
+- **MCP prompts** — five workflows exposed as a first-class protocol primitive, so they work in any MCP host (`/threads:catch_up` and friends in Claude Code, `prompts/list` elsewhere): `catch_up`, `triage_notifications`, `draft_thread`, `research_topic`, `account_health`. Every one drafts and stops — none of them publish. The server now advertises the `prompts` capability alongside `tools`.
+- **An Agent Skill**, shipped in the package and installed with `npx threads-mcp-install-skill`. Skills are a Claude-side mechanism rather than part of MCP, so it is copied into `~/.claude/skills/` (or `--project`) rather than served over the protocol. Non-Claude hosts get the same discipline through the prompts above.
+
 ## [0.2.0] - 2026-07-28
 
 ### Added
