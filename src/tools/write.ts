@@ -44,44 +44,135 @@ const EXT_BY_CT: Record<string, string> = {
   'video/webm': '.webm',
 };
 
-/** Resolve media entries (local paths or URLs) to absolute local file paths. */
-async function resolveMediaFiles(media: string[]): Promise<{ paths: string[]; temps: string[] }> {
-  const paths: string[] = [];
-  const temps: string[] = [];
-  for (const entry of media) {
-    if (/^https?:\/\//i.test(entry)) {
-      let res: Response;
-      try {
-        res = await fetch(entry);
-      } catch (e) {
+/** Ceiling on a downloaded media file. Threads itself rejects far smaller. */
+const MAX_MEDIA_BYTES = parseInt(
+  process.env.THREADS_MAX_MEDIA_BYTES ?? String(64 * 1024 * 1024),
+  10,
+);
+/** How long a single media download may take before we give up. */
+const MEDIA_TIMEOUT_MS = parseInt(process.env.THREADS_MEDIA_TIMEOUT_MS ?? '60000', 10);
+
+/**
+ * Download one remote media file to a temp path.
+ *
+ * Streamed with a running byte count rather than buffered via `arrayBuffer()`.
+ * The old version accepted whatever the far end sent: no timeout, no size cap,
+ * no type check — so a slow or hostile URL could hang the write lock until it
+ * gave up, or read a multi-gigabyte response entirely into memory before
+ * discovering Threads would reject it.
+ */
+async function downloadMedia(entry: string): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), MEDIA_TIMEOUT_MS);
+  try {
+    let res: Response;
+    try {
+      res = await fetch(entry, { signal: controller.signal, redirect: 'follow' });
+    } catch (e) {
+      const why =
+        e instanceof Error && e.name === 'AbortError'
+          ? `timed out after ${MEDIA_TIMEOUT_MS}ms`
+          : e instanceof Error
+            ? e.message
+            : String(e);
+      throw new ThreadsAPIError(`Couldn't download media ${entry}: ${why}`, 200, 'media');
+    }
+    if (!res.ok)
+      throw new ThreadsAPIError(
+        `Couldn't download media ${entry} (HTTP ${res.status})`,
+        200,
+        'media',
+      );
+
+    const ct = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    // Catch the common failure of a URL that 200s with an HTML error/login page:
+    // without this it lands on disk as ".jpg" and fails opaquely in the composer.
+    if (ct && !/^(image|video)\//.test(ct)) {
+      throw new ThreadsAPIError(
+        `${entry} returned ${ct}, not an image or video. Threads only accepts ` +
+          'images (jpg/png/webp/avif) and video (mp4/mov/webm).',
+        200,
+        'media',
+      );
+    }
+
+    // Trust the declared length only to fail fast; the running count below is
+    // what actually enforces the cap, since the header can lie or be absent.
+    const declared = Number(res.headers.get('content-length') ?? '');
+    if (Number.isFinite(declared) && declared > MAX_MEDIA_BYTES) {
+      throw new ThreadsAPIError(
+        `${entry} is ${(declared / 1048576).toFixed(1)}MB, over the ` +
+          `${(MAX_MEDIA_BYTES / 1048576).toFixed(0)}MB limit (THREADS_MAX_MEDIA_BYTES).`,
+        200,
+        'media',
+      );
+    }
+
+    const ext = EXT_BY_CT[ct] || path.extname(new URL(entry).pathname) || '.jpg';
+    const tmp = path.join(
+      os.tmpdir(),
+      `threads-mcp-${crypto.randomBytes(6).toString('hex')}${ext}`,
+    );
+
+    const chunks: Buffer[] = [];
+    let total = 0;
+    const reader = res.body?.getReader();
+    if (!reader) throw new ThreadsAPIError(`${entry} returned an empty body.`, 200, 'media');
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_MEDIA_BYTES) {
+        await reader.cancel().catch(() => {});
         throw new ThreadsAPIError(
-          `Couldn't download media ${entry}: ${e instanceof Error ? e.message : e}`,
+          `${entry} exceeded the ${(MAX_MEDIA_BYTES / 1048576).toFixed(0)}MB limit ` +
+            'while downloading (THREADS_MAX_MEDIA_BYTES).',
           200,
           'media',
         );
       }
-      if (!res.ok)
-        throw new ThreadsAPIError(
-          `Couldn't download media ${entry} (HTTP ${res.status})`,
-          200,
-          'media',
-        );
-      const buf = Buffer.from(await res.arrayBuffer());
-      const ct = (res.headers.get('content-type') || '').split(';')[0].trim();
-      const ext = EXT_BY_CT[ct] || path.extname(new URL(entry).pathname) || '.jpg';
-      const tmp = path.join(
-        os.tmpdir(),
-        `threads-mcp-${crypto.randomBytes(6).toString('hex')}${ext}`,
-      );
-      fs.writeFileSync(tmp, buf);
-      paths.push(tmp);
-      temps.push(tmp);
-    } else {
-      const abs = path.resolve(entry.replace(/^~(?=\/|$)/, os.homedir()));
-      if (!fs.existsSync(abs))
-        throw new ThreadsAPIError(`Media file not found: ${entry}`, 200, 'media');
-      paths.push(abs);
+      chunks.push(Buffer.from(value));
     }
+    fs.writeFileSync(tmp, Buffer.concat(chunks));
+    return tmp;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Resolve media entries (local paths or URLs) to absolute local file paths. */
+export async function resolveMediaFiles(
+  media: string[],
+): Promise<{ paths: string[]; temps: string[] }> {
+  const paths: string[] = [];
+  const temps: string[] = [];
+  try {
+    for (const entry of media) {
+      if (/^https?:\/\//i.test(entry)) {
+        const tmp = await downloadMedia(entry);
+        paths.push(tmp);
+        temps.push(tmp);
+      } else {
+        const abs = path.resolve(entry.replace(/^~(?=\/|$)/, os.homedir()));
+        if (!fs.existsSync(abs))
+          throw new ThreadsAPIError(`Media file not found: ${entry}`, 200, 'media');
+        const size = fs.statSync(abs).size;
+        if (size > MAX_MEDIA_BYTES) {
+          throw new ThreadsAPIError(
+            `${entry} is ${(size / 1048576).toFixed(1)}MB, over the ` +
+              `${(MAX_MEDIA_BYTES / 1048576).toFixed(0)}MB limit (THREADS_MAX_MEDIA_BYTES).`,
+            200,
+            'media',
+          );
+        }
+        paths.push(abs);
+      }
+    }
+  } catch (e) {
+    // Don't strand temp files from earlier entries when a later one fails —
+    // the caller's cleanup only runs for a list it successfully received.
+    cleanupTemps(temps);
+    throw e;
   }
   return { paths, temps };
 }
@@ -147,9 +238,22 @@ async function uploadMedia(page: Page, paths: string[]): Promise<void> {
   }
 }
 
-/** Delete any temp files we downloaded for a post. */
+/**
+ * Delete any temp files we downloaded for a post.
+ *
+ * Synchronous on purpose. The callback form is fire-and-forget, so nothing
+ * guarantees the unlink runs before the process moves on — and on the error
+ * path, where the server may be shutting down or the caller may exit, the files
+ * simply leaked into the temp directory.
+ */
 function cleanupTemps(temps: string[]): void {
-  for (const t of temps) fs.rm(t, { force: true }, () => {});
+  for (const t of temps) {
+    try {
+      fs.rmSync(t, { force: true });
+    } catch {
+      /* already gone, or not ours to remove */
+    }
+  }
 }
 
 async function requireLogin(): Promise<void> {
