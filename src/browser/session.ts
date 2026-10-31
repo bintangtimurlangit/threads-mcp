@@ -47,6 +47,40 @@ async function createContext(headless: boolean): Promise<BrowserContext> {
     humanize: true,
     args: ['--no-sandbox', '--disable-dev-shm-usage'],
   })) as unknown as BrowserContext;
+  // An embedding host can provide session cookies at process launch. Import
+  // them when the browser is first needed, so MCP tool discovery remains cheap
+  // and separate workers can use separate profile directories.
+  const sessionid = process.env.THREADS_SESSIONID;
+  if (sessionid) {
+    const userid = process.env.THREADS_DS_USER_ID;
+    const domains = [`.${DOMAIN}`, '.instagram.com'];
+    await ctx.addCookies(
+      domains.flatMap((domain) => [
+        {
+          name: 'sessionid',
+          value: sessionid,
+          domain,
+          path: '/',
+          secure: true,
+          httpOnly: true,
+          sameSite: 'Lax' as const,
+        },
+        ...(userid
+          ? [
+              {
+                name: 'ds_user_id',
+                value: userid,
+                domain,
+                path: '/',
+                secure: true,
+                httpOnly: false,
+                sameSite: 'Lax' as const,
+              },
+            ]
+          : []),
+      ]),
+    );
+  }
   return ctx;
 }
 
@@ -434,6 +468,13 @@ let cachedHandle: string | undefined;
  */
 export async function resolveOwnHandle(): Promise<string | undefined> {
   if (cachedHandle) return cachedHandle;
+  // An explicit account binding is the reliable option for headless sessions.
+  // The home feed contains many profile links, none of which identifies us.
+  const configured = process.env.THREADS_ACCOUNT_HANDLE?.replace(/^@/, '').trim();
+  if (configured && /^[A-Za-z0-9._]+$/.test(configured)) {
+    cachedHandle = configured;
+    return configured;
+  }
   return withLock(async () => {
     if (cachedHandle) return cachedHandle;
     const page = await getPage();
@@ -441,8 +482,8 @@ export async function resolveOwnHandle(): Promise<string | undefined> {
       await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded', timeout: 45000 });
       await page.waitForTimeout(2000);
     }
-    // The nav exposes several `/@handle` links; the profile tab points at *us*.
-    // Prefer an <a> whose aria-label mentions "Profile", else the last such link.
+    // Only an explicitly labelled profile link can identify the account. Feed
+    // author links must never become a fallback for write operations.
     const handle = await page
       .evaluate(() => {
         // Runs in the browser; `document` is the page DOM, not Node's global.
@@ -451,8 +492,7 @@ export async function resolveOwnHandle(): Promise<string | undefined> {
         };
         const anchors = Array.from(doc.querySelectorAll('a[href^="/@"]'));
         const profile = anchors.find((a) => /profile/i.test(a.getAttribute('aria-label') || ''));
-        const pick = profile ?? anchors[anchors.length - 1];
-        const m = pick?.getAttribute('href')?.match(/^\/@([A-Za-z0-9._]+)/);
+        const m = profile?.getAttribute('href')?.match(/^\/@([A-Za-z0-9._]+)/);
         return m ? m[1] : undefined;
       })
       .catch(() => undefined);
